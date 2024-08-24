@@ -12,14 +12,16 @@ pub fn main() !void {
     defer server.deinit();
     std.log.info("Server listening on port {}\n", .{address.getPort()});
 
-    var client = try server.accept();
-    defer client.stream.close();
-    std.log.info("Connection received! {} is sending data...\n", .{client.address});
+    while (true) {
+        var client = try server.accept();
+        defer client.stream.close();
+        std.log.info("Connection received! {} is sending data...\n", .{client.address});
 
-    const message = try client.stream.reader().readAllAlloc(allocator, 1024);
-    defer allocator.free(message);
-
-    std.log.info("{} says {s}\n", .{ client.address, message });
+        var reader = client.stream.reader();
+        const message = try reader.readAllAlloc(allocator, 1024);
+        defer allocator.free(message);
+        std.log.info("{} says {s}\n", .{ client.address, message });
+    }
 }
 
 test "simple test" {
