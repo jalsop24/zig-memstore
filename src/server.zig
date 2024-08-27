@@ -1,26 +1,41 @@
 const std = @import("std");
 
+fn getPortFromArgs(args: *std.process.ArgIterator) !u16 {
+    const raw_port = args.next() orelse {
+        std.log.info("Expected port as a command line argument\n", .{});
+        return error.NoPort;
+    };
+    return try std.fmt.parseInt(u16, raw_port, 10);
+}
+
 pub fn main() !void {
     var gpa_alloc = std.heap.GeneralPurposeAllocator(.{}){};
     defer std.debug.assert(gpa_alloc.deinit() == .ok);
     const allocator = gpa_alloc.allocator();
 
-    const address = std.net.Address.initIp4(.{ 0, 0, 0, 0 }, 9876);
+    var args = try std.process.argsWithAllocator(allocator);
+    defer args.deinit();
+
+    // Skip first argument (path to program)
+    _ = args.skip();
+    const port = try getPortFromArgs(&args);
+
+    const address = std.net.Address.initIp4(.{ 0, 0, 0, 0 }, port);
     var server = try address.listen(.{
         .reuse_port = true,
     });
     defer server.deinit();
-    std.log.info("Server listening on port {}\n", .{address.getPort()});
+    std.log.info("Server listening on port {}", .{address.getPort()});
 
     while (true) {
         var client = try server.accept();
         defer client.stream.close();
-        std.log.info("Connection received! {} is sending data...\n", .{client.address});
+        std.log.info("Connection received! {} is sending data...", .{client.address});
 
         var reader = client.stream.reader();
         const message = try reader.readAllAlloc(allocator, 1024);
         defer allocator.free(message);
-        std.log.info("{} says {s}\n", .{ client.address, message });
+        std.log.info("{} says {s}", .{ client.address, message });
     }
 }
 
