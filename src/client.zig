@@ -1,10 +1,6 @@
 const std = @import("std");
 
-fn getPortFromArgs(allocator: std.mem.Allocator) !u16 {
-    var args = try std.process.argsWithAllocator(allocator);
-    defer args.deinit();
-    // Skip first argument (path to program)
-    _ = args.skip();
+fn getPortFromArgs(args: *std.process.ArgIterator) !u16 {
     const raw_port = args.next() orelse {
         std.log.info("Expected port as a command line argument\n", .{});
         return error.NoPort;
@@ -17,7 +13,12 @@ pub fn main() !void {
     defer std.debug.assert(gpa_alloc.deinit() == .ok);
     const allocator = gpa_alloc.allocator();
 
-    const port = try getPortFromArgs(allocator);
+    var args = try std.process.argsWithAllocator(allocator);
+    defer args.deinit();
+
+    // Skip first argument (path to program)
+    _ = args.skip();
+    const port = try getPortFromArgs(&args);
     const localhost = std.net.Address.initIp4(.{ 127, 0, 0, 1 }, port);
 
     std.log.info("Connecting to {}", .{localhost});
