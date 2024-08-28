@@ -1,11 +1,53 @@
 const std = @import("std");
 
+const protocol = @import("protocol.zig");
+
 fn getPortFromArgs(args: *std.process.ArgIterator) !u16 {
     const raw_port = args.next() orelse {
         std.log.info("Expected port as a command line argument\n", .{});
         return error.NoPort;
     };
     return try std.fmt.parseInt(u16, raw_port, 10);
+}
+
+fn oneRequest(connection: *std.net.Stream) !void {
+    var r_buf: [4 + protocol.k_max_msg]u8 = undefined;
+
+    const num_read = try connection.readAtLeast(&r_buf, 4);
+    if (num_read < 4) {
+        std.log.debug(
+            "Failed to read full message length. Read {} bytes",
+            .{num_read},
+        );
+        return error.EOF;
+    }
+    const len = std.mem.readPackedInt(
+        u32,
+        r_buf[0..4],
+        0,
+        .little,
+    );
+
+    if (len > protocol.k_max_msg) {
+        std.log.debug("Len {}", .{len});
+        std.log.debug("Message: {x}", .{r_buf[0..4]});
+        return error.MessageTooLong;
+    }
+
+    if (num_read < 4 + len) {
+        const num_left = 4 + len - num_read;
+        const num_read_body = try connection.readAtLeast(r_buf[4..], num_left);
+        if (num_read_body != len) {
+            std.log.debug("Connection closed before reading full message - {s}", .{r_buf});
+            return error.EOF;
+        }
+    }
+
+    const message = r_buf[4 .. 4 + len];
+
+    std.log.debug("Full message {x}", .{r_buf[0 .. 4 + len]});
+    std.log.info("Received {} bytes from client", .{4 + len});
+    std.log.info("Client says '{s}'", .{message});
 }
 
 pub fn main() !void {
@@ -32,22 +74,11 @@ pub fn main() !void {
         defer client.stream.close();
         std.log.info("Connection received! {} is sending data...", .{client.address});
 
-        var reader = client.stream.reader();
-        const message = try reader.readAllAlloc(allocator, 1024);
-        defer allocator.free(message);
-        std.log.info("{} says {s}", .{ client.address, message });
+        while (true) {
+            oneRequest(&client.stream) catch |err| switch (err) {
+                error.EOF => break,
+                else => return err,
+            };
+        }
     }
-}
-
-test "simple test" {
-    var list = std.ArrayList(i32).init(std.testing.allocator);
-    defer list.deinit(); // Try commenting this out and see if zig detects the memory leak!
-    try list.append(42);
-    try std.testing.expectEqual(@as(i32, 42), list.pop());
-}
-
-test "fuzz example" {
-    // Try passing `--fuzz` to `zig build test` and see if it manages to fail this test case!
-    const input_bytes = std.testing.fuzzInput(.{});
-    try std.testing.expect(!std.mem.eql(u8, "canyoufindme", input_bytes));
 }
