@@ -1,5 +1,7 @@
 const std = @import("std");
 
+const protocol = @import("protocol.zig");
+
 fn getPortFromArgs(args: *std.process.ArgIterator) !u16 {
     const raw_port = args.next() orelse {
         std.log.info("Expected port as a command line argument\n", .{});
@@ -35,9 +37,14 @@ pub fn main() !void {
     };
     defer stream.close();
     std.log.info("Connected!", .{});
-
-    const data = "Hello zig!";
     var writer = stream.writer();
-    const size = try writer.write(data);
-    std.log.info("Sending '{s}' to server, total sent: {d} bytes\n", .{ data, size });
+
+    const message = "Hello zig!";
+    var w_buf: [4 + protocol.k_max_msg]u8 = undefined;
+    const m_size = try protocol.createPayload(message, &w_buf);
+    const payload = w_buf[0..m_size];
+
+    const size = try writer.write(payload);
+
+    std.log.info("Sending '{s}' to server, total sent: {d} bytes\n", .{ payload[4..], size });
 }
