@@ -41,4 +41,8 @@ pub fn main() !void {
     const message = "Hello ...";
     std.log.info("Sending '{s}' to server", .{message});
     try protocol.sendMessage(&stream, message);
+
+    var m_buf: [protocol.k_max_msg]u8 = undefined;
+    const len = try protocol.receiveMessage(&stream, &m_buf);
+    std.log.info("Received from server '{s}", .{m_buf[0..len]});
 }

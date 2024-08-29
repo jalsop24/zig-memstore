@@ -10,44 +10,13 @@ fn getPortFromArgs(args: *std.process.ArgIterator) !u16 {
     return try std.fmt.parseInt(u16, raw_port, 10);
 }
 
-fn oneRequest(connection: *std.net.Stream) !void {
-    var r_buf: [4 + protocol.k_max_msg]u8 = undefined;
+fn oneRequest(stream: *const std.net.Stream) !void {
+    var m_buf: [protocol.k_max_msg]u8 = undefined;
+    const len = try protocol.receiveMessage(stream, &m_buf);
+    std.log.info("Client says '{s}'", .{m_buf[0..len]});
 
-    const num_read = try connection.readAtLeast(&r_buf, 4);
-    if (num_read < 4) {
-        std.log.debug(
-            "Failed to read full message length. Read {} bytes",
-            .{num_read},
-        );
-        return error.EOF;
-    }
-    const len = std.mem.readPackedInt(
-        u32,
-        r_buf[0..4],
-        0,
-        .little,
-    );
-
-    if (len > protocol.k_max_msg) {
-        std.log.debug("Len {}", .{len});
-        std.log.debug("Message: {x}", .{r_buf[0..4]});
-        return error.MessageTooLong;
-    }
-
-    if (num_read < 4 + len) {
-        const num_left = 4 + len - num_read;
-        const num_read_body = try connection.readAtLeast(r_buf[4..], num_left);
-        if (num_read_body != len) {
-            std.log.debug("Connection closed before reading full message - {s}", .{r_buf});
-            return error.EOF;
-        }
-    }
-
-    const message = r_buf[4 .. 4 + len];
-
-    std.log.debug("Full message {x}", .{r_buf[0 .. 4 + len]});
-    std.log.info("Received {} bytes from client", .{4 + len});
-    std.log.info("Client says '{s}'", .{message});
+    const reply = "world!";
+    try protocol.sendMessage(stream, reply);
 }
 
 pub fn main() !void {
@@ -70,12 +39,13 @@ pub fn main() !void {
     std.log.info("Server listening on port {}", .{address.getPort()});
 
     while (true) {
-        var client = try server.accept();
+        const client = try server.accept();
         defer client.stream.close();
         std.log.info("Connection received! {} is sending data...", .{client.address});
 
+        const stream = client.stream;
         while (true) {
-            oneRequest(&client.stream) catch |err| switch (err) {
+            oneRequest(&stream) catch |err| switch (err) {
                 error.EOF => break,
                 else => return err,
             };
