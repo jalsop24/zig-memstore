@@ -37,14 +37,8 @@ pub fn main() !void {
     };
     defer stream.close();
     std.log.info("Connected!", .{});
-    var writer = stream.writer();
 
-    const message = "Hello zig!";
-    var w_buf: [4 + protocol.k_max_msg]u8 = undefined;
-    const m_size = try protocol.createPayload(message, &w_buf);
-    const payload = w_buf[0..m_size];
-
-    const size = try writer.write(payload);
-
-    std.log.info("Sending '{s}' to server, total sent: {d} bytes\n", .{ payload[4..], size });
+    const message = "Hello ...";
+    std.log.info("Sending '{s}' to server", .{message});
+    try protocol.sendMessage(&stream, message);
 }
