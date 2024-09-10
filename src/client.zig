@@ -10,6 +10,13 @@ fn getPortFromArgs(args: *std.process.ArgIterator) !u16 {
     return try std.fmt.parseInt(u16, raw_port, 10);
 }
 
+fn receiveMessage(fd: std.posix.socket_t, mbuf: *[protocol.k_max_msg]u8) !usize {
+    _ = try std.posix.read(fd, mbuf[0..4]);
+    const m_len = std.mem.readPackedInt(u32, mbuf[0..4], 0, .little);
+    const m_read = try std.posix.read(fd, mbuf[0..m_len]);
+    return m_read;
+}
+
 pub fn main() !void {
     var gpa_alloc = std.heap.GeneralPurposeAllocator(.{}){};
     defer std.debug.assert(gpa_alloc.deinit() == .ok);
@@ -37,14 +44,19 @@ pub fn main() !void {
     };
     defer stream.close();
     std.log.info("Connected!", .{});
-    var writer = stream.writer();
 
     const message = "Hello zig!";
     var w_buf: [4 + protocol.k_max_msg]u8 = undefined;
     const m_size = try protocol.createPayload(message, &w_buf);
     const payload = w_buf[0..m_size];
 
-    const size = try writer.write(payload);
+    const size = try std.posix.write(stream.handle, payload);
 
     std.log.info("Sending '{s}' to server, total sent: {d} bytes\n", .{ payload[4..], size });
+
+    var mbuf: [protocol.k_max_msg]u8 = undefined;
+
+    const len = try receiveMessage(stream.handle, &mbuf);
+
+    std.log.info("Received from server '{s}'", .{mbuf[0..len]});
 }

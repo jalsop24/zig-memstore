@@ -88,7 +88,7 @@ fn tryOneRequest(conn: *Conn) bool {
 }
 
 fn tryFillBuffer(conn: *Conn) bool {
-    const num_read = conn.stream.readAll(conn.rbuf[conn.rbuf_size..]) catch |err|
+    const num_read = conn.stream.read(conn.rbuf[conn.rbuf_size..]) catch |err|
         switch (err) {
         // WouldBlock corresponds to EAGAIN signal
         error.WouldBlock => return false,
@@ -235,6 +235,7 @@ pub fn main() !void {
         // separately
         // Process active client connections
         for (poll_args.items[1..]) |pfd| {
+            std.log.info("pfd {any}", .{pfd});
             if (pfd.revents == 0) continue;
 
             const conn = fd2conn.get(pfd.fd).?;
