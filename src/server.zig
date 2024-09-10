@@ -77,7 +77,7 @@ fn tryOneRequest(conn: *Conn) bool {
         std.mem.copyForwards(
             u8,
             conn.rbuf[0..remaining_bytes],
-            conn.rbuf[4 + len .. conn.rbuf.len],
+            conn.rbuf[4 + len .. conn.rbuf_size],
         );
     }
     conn.rbuf_size = remaining_bytes;
@@ -122,7 +122,7 @@ fn stateReq(conn: *Conn) void {
 }
 
 fn tryFlushBuffer(conn: *Conn) bool {
-    conn.stream.writeAll(&conn.wbuf) catch |err|
+    conn.stream.writeAll(conn.wbuf[0..conn.wbuf_size]) catch |err|
         switch (err) {
         error.WouldBlock => return false,
         else => {

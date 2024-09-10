@@ -11,8 +11,16 @@ fn getPortFromArgs(args: *std.process.ArgIterator) !u16 {
 }
 
 fn receiveMessage(fd: std.posix.socket_t, mbuf: *[protocol.k_max_msg]u8) !usize {
-    _ = try std.posix.read(fd, mbuf[0..4]);
+    const header_len = try std.posix.read(fd, mbuf[0..4]);
+    if (header_len < 4) {
+        std.log.info("Unable to read full header. {} bytes", .{header_len});
+        return error.MessageTooShort;
+    }
     const m_len = std.mem.readPackedInt(u32, mbuf[0..4], 0, .little);
+    if (m_len > protocol.k_max_msg) {
+        std.log.info("Invalid response {}", .{m_len});
+        return error.InvalidResponse;
+    }
     const m_read = try std.posix.read(fd, mbuf[0..m_len]);
     return m_read;
 }
@@ -45,16 +53,18 @@ pub fn main() !void {
     defer stream.close();
     std.log.info("Connected!", .{});
 
-    const message = "Hello ...";
     var wbuf: [protocol.k_max_msg]u8 = undefined;
-    const wlen = try protocol.createPayload(message, &wbuf);
-    const size = try std.posix.write(stream.handle, wbuf[0..wlen]);
 
-    std.log.info("Sending '{s}' to server, total sent: {d} bytes\n", .{ wbuf[4..wlen], size });
+    const messages = [_]*const [9:0]u8{ "Hello ...", "message 2", "message 3" };
+    for (messages) |message| {
+        const wlen = try protocol.createPayload(message, &wbuf);
+        const size = try std.posix.write(stream.handle, wbuf[0..wlen]);
+        std.log.info("Sending '{s}' to server, total sent: {d} bytes", .{ wbuf[4..wlen], size });
+    }
 
-    var mbuf: [protocol.k_max_msg]u8 = undefined;
-
-    const len = try receiveMessage(stream.handle, &mbuf);
-
-    std.log.info("Received from server '{s}'", .{mbuf[0..len]});
+    for (0..3) |_| {
+        var rbuf: [protocol.k_max_msg]u8 = undefined;
+        const len = try receiveMessage(stream.handle, &rbuf);
+        std.log.info("Received from server '{s}'", .{rbuf[0..len]});
+    }
 }
