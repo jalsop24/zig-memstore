@@ -2,9 +2,13 @@ const std = @import("std");
 
 const protocol = @import("protocol.zig");
 
+/// The different states that a connection can be in
 const State = enum {
+    /// Request
     REQ,
+    /// Response
     RES,
+    /// End of connection
     END,
 };
 
@@ -13,6 +17,7 @@ const Conn = struct {
     state: State = .REQ,
     // Read buffer
     rbuf_size: usize = 0,
+    rbuf_cursor: usize = 0,
     rbuf: [4 + protocol.k_max_msg]u8,
     // Write buffer
     wbuf_size: usize = 0,
@@ -45,16 +50,17 @@ fn tryOneRequest(conn: *Conn) bool {
         return false;
     }
 
+    const length_header = conn.rbuf[conn.rbuf_cursor .. conn.rbuf_cursor + 4];
     const len = std.mem.readPackedInt(
         u32,
-        conn.rbuf[0..4],
+        length_header,
         0,
         .little,
     );
 
     if (len > protocol.k_max_msg) {
         std.log.debug("Too long - len = {}", .{len});
-        std.log.debug("Message: {x}", .{conn.rbuf[0..4]});
+        std.log.debug("Message: {x}", .{length_header});
         conn.state = .END;
         return false;
     }
@@ -64,23 +70,20 @@ fn tryOneRequest(conn: *Conn) bool {
         return false;
     }
 
-    const message = conn.rbuf[4 .. 4 + len];
+    const message = conn.rbuf[conn.rbuf_cursor + 4 .. conn.rbuf_cursor + 4 + len];
     std.log.info("Client says '{s}'", .{message});
 
     // Generate echo response
-    @memcpy(conn.wbuf[0 .. 4 + len], conn.rbuf[0 .. 4 + len]);
+    @memcpy(conn.wbuf[0 .. 4 + len], conn.rbuf[conn.rbuf_cursor .. conn.rbuf_cursor + 4 + len]);
     conn.wbuf_size = 4 + len;
 
-    // Remove request from read buffer
+    // 'Remove' request from read buffer
     const remaining_bytes = conn.rbuf_size - 4 - len;
-    if (remaining_bytes != 0) {
-        std.mem.copyForwards(
-            u8,
-            conn.rbuf[0..remaining_bytes],
-            conn.rbuf[4 + len .. conn.rbuf_size],
-        );
-    }
     conn.rbuf_size = remaining_bytes;
+    // Update read cursor position
+    conn.rbuf_cursor = conn.rbuf_cursor + 4 + len;
+
+    // Trigger response logic
     conn.state = .RES;
     stateRes(conn);
 
@@ -88,6 +91,14 @@ fn tryOneRequest(conn: *Conn) bool {
 }
 
 fn tryFillBuffer(conn: *Conn) bool {
+    // Reset buffer so that it is filled right from the start
+    std.mem.copyForwards(
+        u8,
+        conn.rbuf[0..conn.rbuf_size],
+        conn.rbuf[conn.rbuf_cursor .. conn.rbuf_cursor + conn.rbuf_size],
+    );
+    conn.rbuf_cursor = 0;
+
     const num_read = conn.stream.read(conn.rbuf[conn.rbuf_size..]) catch |err|
         switch (err) {
         // WouldBlock corresponds to EAGAIN signal
