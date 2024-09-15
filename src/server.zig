@@ -246,7 +246,6 @@ pub fn main() !void {
         // separately
         // Process active client connections
         for (poll_args.items[1..]) |pfd| {
-            std.log.info("pfd {any}", .{pfd});
             if (pfd.revents == 0) continue;
 
             const conn = fd2conn.get(pfd.fd).?;
