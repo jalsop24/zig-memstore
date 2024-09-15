@@ -54,15 +54,19 @@ pub fn main() !void {
     std.log.info("Connected!", .{});
 
     var wbuf: [protocol.k_max_msg]u8 = undefined;
+    var input_buf: [1000]u8 = undefined;
+    var cli_reader = std.io.getStdIn().reader();
+    const stdout = std.io.getStdOut().writer();
+    const DELIMITER: u8 = '\n';
 
-    const messages = [_]*const [9:0]u8{ "Hello ...", "message 2", "message 3" };
-    for (messages) |message| {
+    while (true) {
+        _ = try stdout.write(">>> ");
+        const message = try cli_reader.readUntilDelimiterOrEof(&input_buf, DELIMITER) orelse return;
+
         const wlen = try protocol.createPayload(message, &wbuf);
         const size = try std.posix.write(stream.handle, wbuf[0..wlen]);
         std.log.info("Sending '{s}' to server, total sent: {d} bytes", .{ wbuf[4..wlen], size });
-    }
 
-    for (0..3) |_| {
         var rbuf: [protocol.k_max_msg]u8 = undefined;
         const len = try receiveMessage(stream.handle, &rbuf);
         std.log.info("Received from server '{s}'", .{rbuf[0..len]});
