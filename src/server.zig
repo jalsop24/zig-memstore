@@ -36,6 +36,28 @@ const Conn = struct {
     }
 };
 
+const String = struct {
+    content: []u8,
+
+    pub fn init(allocator: std.mem.Allocator, content: []u8) !*String {
+        var new = try allocator.create(String);
+        errdefer allocator.destroy(new);
+
+        const bytes = try allocator.alloc(u8, content.len);
+        new.content = bytes;
+
+        @memcpy(new.content, content);
+        return new;
+    }
+
+    pub fn deinit(self: *String, allocator: std.mem.Allocator) void {
+        allocator.free(self.content);
+        allocator.destroy(self);
+    }
+};
+
+const MainMapping = std.StringArrayHashMap(*String);
+
 fn getPortFromArgs(args: *std.process.ArgIterator) !u16 {
     const raw_port = args.next() orelse {
         std.log.info("Expected port as a command line argument\n", .{});
@@ -44,7 +66,113 @@ fn getPortFromArgs(args: *std.process.ArgIterator) !u16 {
     return try std.fmt.parseInt(u16, raw_port, 10);
 }
 
-fn tryOneRequest(conn: *Conn) bool {
+const HandleRequestError = error{InvalidRequest} || protocol.PayloadCreationError;
+
+fn handleUnknownCommand(conn: *Conn, buf: []u8) void {
+    std.log.info("Client says '{s}'", .{buf});
+    // Generate echo response
+    @memcpy(conn.wbuf[0 .. 4 + buf.len], conn.rbuf[conn.rbuf_cursor .. conn.rbuf_cursor + 4 + buf.len]);
+    conn.wbuf_size = 4 + buf.len;
+}
+
+fn handleGetCommand(conn: *Conn, buf: []u8, main_mapping: *MainMapping) HandleRequestError!void {
+    std.log.info("Get command '{0s}' ({0x})", .{buf});
+
+    if (buf.len < 5) {
+        std.log.debug("Invalid request - {s} (len = {})", .{ buf, buf.len });
+        return HandleRequestError.InvalidRequest;
+    }
+
+    const key_len = std.mem.readPackedInt(u16, buf[3..5], 0, .little);
+    if (key_len != buf.len - 5) {
+        return HandleRequestError.InvalidRequest;
+    }
+    const key = buf[5 .. 5 + key_len];
+
+    const value: []u8 = if (main_mapping.get(key)) |str|
+        str.content
+    else
+        @constCast(@ptrCast("null"));
+
+    const response_format = "get {s} -> {s}";
+
+    var response_buf: [protocol.k_max_msg]u8 = undefined;
+    const response = std.fmt.bufPrint(&response_buf, response_format, .{ key, value }) catch |err|
+        switch (err) {
+        error.NoSpaceLeft => unreachable,
+    };
+
+    const written = try protocol.createPayload(response, conn.wbuf[conn.wbuf_size..]);
+    conn.wbuf_size += written;
+}
+
+fn handleSetCommand(conn: *Conn, buf: []u8, main_mapping: *MainMapping) HandleRequestError!void {
+    std.log.info("Set command '{0s}' ({0x})", .{buf});
+
+    if (buf.len < 5) {
+        std.log.debug("Invalid request - {s} (len = {})", .{ buf, buf.len });
+        return HandleRequestError.InvalidRequest;
+    }
+
+    const key = protocol.parseString(buf[3..]) catch |err| switch (err) {
+        error.InvalidString => {
+            std.log.debug("Failed to parse key {s}", .{buf[3..]});
+            return HandleRequestError.InvalidRequest;
+        },
+    };
+    std.log.info("Key {s}", .{key});
+
+    const value = protocol.parseString(buf[5 + key.len ..]) catch |err| switch (err) {
+        error.InvalidString => {
+            std.log.debug("Failed to parse value {s}", .{buf[5 + key.len ..]});
+            return HandleRequestError.InvalidRequest;
+        },
+    };
+
+    const new_str = String.init(main_mapping.allocator, value) catch |err| switch (err) {
+        error.OutOfMemory => return HandleRequestError.InvalidRequest,
+    };
+    main_mapping.put(key, new_str) catch {
+        std.log.debug("Failed to put into mapping {any}", .{new_str});
+        return HandleRequestError.InvalidRequest;
+    };
+
+    const response = "created";
+    const written = protocol.createPayload(response, conn.wbuf[conn.wbuf_size..]) catch unreachable;
+    conn.wbuf_size += written;
+}
+
+fn parseRequest(conn: *Conn, buf: []u8, main_mapping: *MainMapping) void {
+
+    // Support get, set, del
+
+    // first 3 bytes are the type of command
+    if (buf.len < 3) return handleUnknownCommand(conn, buf);
+
+    var err: ?HandleRequestError = null;
+    switch (protocol.parseCommand(buf[0..3])) {
+        .Get => handleGetCommand(conn, buf, main_mapping) catch |e| {
+            err = e;
+        },
+        .Set => handleSetCommand(conn, buf, main_mapping) catch |e| {
+            err = e;
+        },
+        .Unknown => handleUnknownCommand(conn, buf),
+    }
+
+    if (err != null) {
+        switch (err.?) {
+            // Length check has already been completed
+            error.MessageTooLong => unreachable,
+            error.InvalidRequest => {
+                const written = protocol.createPayload("Invalid request", conn.wbuf[conn.wbuf_size..]) catch unreachable;
+                conn.wbuf_size += written;
+            },
+        }
+    }
+}
+
+fn tryOneRequest(conn: *Conn, main_mapping: *MainMapping) bool {
     if (conn.rbuf_size < 4) {
         // Not enough data in the buffer, try after the next poll
         return false;
@@ -71,11 +199,7 @@ fn tryOneRequest(conn: *Conn) bool {
     }
 
     const message = conn.rbuf[conn.rbuf_cursor + 4 .. conn.rbuf_cursor + 4 + len];
-    std.log.info("Client says '{s}'", .{message});
-
-    // Generate echo response
-    @memcpy(conn.wbuf[0 .. 4 + len], conn.rbuf[conn.rbuf_cursor .. conn.rbuf_cursor + 4 + len]);
-    conn.wbuf_size = 4 + len;
+    parseRequest(conn, message, main_mapping);
 
     // 'Remove' request from read buffer
     const remaining_bytes = conn.rbuf_size - 4 - len;
@@ -90,7 +214,7 @@ fn tryOneRequest(conn: *Conn) bool {
     return (conn.state == .REQ);
 }
 
-fn tryFillBuffer(conn: *Conn) bool {
+fn tryFillBuffer(conn: *Conn, main_mapping: *MainMapping) bool {
     // Reset buffer so that it is filled right from the start
     std.mem.copyForwards(
         u8,
@@ -124,12 +248,12 @@ fn tryFillBuffer(conn: *Conn) bool {
     std.debug.assert(conn.rbuf_size < conn.rbuf.len);
 
     // Parse multiple requests as more than one may be sent at a time
-    while (tryOneRequest(conn)) {}
+    while (tryOneRequest(conn, main_mapping)) {}
     return (conn.state == .REQ);
 }
 
-fn stateReq(conn: *Conn) void {
-    while (tryFillBuffer(conn)) {}
+fn stateReq(conn: *Conn, main_mapping: *MainMapping) void {
+    while (tryFillBuffer(conn, main_mapping)) {}
 }
 
 fn tryFlushBuffer(conn: *Conn) bool {
@@ -153,9 +277,9 @@ fn stateRes(conn: *Conn) void {
     while (tryFlushBuffer(conn)) {}
 }
 
-fn connectionIo(conn: *Conn) !void {
+fn connectionIo(conn: *Conn, main_mapping: *MainMapping) !void {
     switch (conn.state) {
-        .REQ => stateReq(conn),
+        .REQ => stateReq(conn, main_mapping),
         .RES => stateRes(conn),
         .END => return error.InvalidConnection,
     }
@@ -207,6 +331,14 @@ pub fn main() !void {
         fd2conn.deinit();
     }
 
+    var main_mapping = MainMapping.init(allocator);
+    defer {
+        for (main_mapping.values()) |val| {
+            val.deinit(allocator);
+        }
+        main_mapping.deinit();
+    }
+
     while (true) {
         poll_args.clearAndFree();
 
@@ -249,7 +381,7 @@ pub fn main() !void {
             if (pfd.revents == 0) continue;
 
             const conn = fd2conn.get(pfd.fd).?;
-            try connectionIo(conn);
+            try connectionIo(conn, &main_mapping);
 
             if (conn.state == .END) {
                 std.log.info("Remove connection", .{});
