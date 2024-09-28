@@ -89,7 +89,11 @@ fn handleGetCommand(conn: *Conn, buf: []u8, main_mapping: *MainMapping) HandleRe
     }
     const key = buf[5 .. 5 + key_len];
 
-    const value: []u8 = if (main_mapping.get(key)) |str|
+    std.log.info("Get key '{s}'", .{key});
+    const raw_value = (main_mapping.get(key));
+
+    std.log.debug("content", .{});
+    const value: []u8 = if (raw_value) |str|
         str.content
     else
         @constCast(@ptrCast("null"));
@@ -129,11 +133,15 @@ fn handleSetCommand(conn: *Conn, buf: []u8, main_mapping: *MainMapping) HandleRe
         },
     };
 
-    const new_str = String.init(main_mapping.allocator, value) catch |err| switch (err) {
+    const new_key = main_mapping.allocator.alloc(u8, key.len) catch return HandleRequestError.InvalidRequest;
+    @memcpy(new_key, key);
+
+    const new_val = String.init(main_mapping.allocator, value) catch |err| switch (err) {
         error.OutOfMemory => return HandleRequestError.InvalidRequest,
     };
-    main_mapping.put(key, new_str) catch {
-        std.log.debug("Failed to put into mapping {any}", .{new_str});
+
+    main_mapping.put(new_key, new_val) catch {
+        std.log.debug("Failed to put into mapping {any}", .{new_val});
         return HandleRequestError.InvalidRequest;
     };
 
@@ -353,6 +361,7 @@ pub fn main() !void {
     defer {
         // Make sure to clean up any lasting connections before
         // deiniting the hashmap
+        std.log.info("Clean up connections", .{});
         for (fd2conn.values()) |conn| {
             conn.stream.close();
             allocator.destroy(conn);
@@ -362,7 +371,8 @@ pub fn main() !void {
 
     var main_mapping = MainMapping.init(allocator);
     defer {
-        for (main_mapping.values()) |val| {
+        for (main_mapping.keys(), main_mapping.values()) |key, val| {
+            allocator.free(key);
             val.deinit(allocator);
         }
         main_mapping.deinit();
