@@ -112,7 +112,7 @@ pub fn main() !void {
         var message = try cli_reader.readUntilDelimiterOrEof(&input_buf, DELIMITER) orelse return;
         var wlen: u32 = 0;
 
-        switch (protocol.parseCommand((&input_buf)[0..3])) {
+        switch (protocol.parseCommand(message[0..3])) {
             .Get => {
                 const out_buf = wbuf[4..];
                 @memcpy(out_buf[0..3], "get");
@@ -165,6 +165,28 @@ pub fn main() !void {
                     .little,
                 );
 
+                wlen = 4 + m_len;
+            },
+            .Delete => {
+                const out_buf = wbuf[4..];
+                @memcpy(out_buf[0..3], "del");
+
+                // Parse the key back into the input buffer
+                const key_len, _ = try parseWord(message[3..], out_buf[3..]);
+                std.log.info("Key length {}", .{key_len});
+
+                // 3 Bytes for command
+                // 2 bytes for key length
+                // key_len bytes for key content
+                const m_len: u32 = 3 + 2 + key_len;
+
+                std.mem.writePackedInt(
+                    u32,
+                    wbuf[0..4],
+                    0,
+                    m_len,
+                    .little,
+                );
                 wlen = 4 + m_len;
             },
             .Unknown => {

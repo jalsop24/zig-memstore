@@ -142,6 +142,32 @@ fn handleSetCommand(conn: *Conn, buf: []u8, main_mapping: *MainMapping) HandleRe
     conn.wbuf_size += written;
 }
 
+fn handleDeleteCommand(conn: *Conn, buf: []u8, main_mapping: *MainMapping) HandleRequestError!void {
+    std.log.info("Delete command '{0s}' (0x)", .{buf});
+
+    if (buf.len < 5) {
+        std.log.debug("Invalid request - {s} (len = {})", .{ buf, buf.len });
+        return HandleRequestError.InvalidRequest;
+    }
+
+    const key = protocol.parseString(buf[3..]) catch |err| switch (err) {
+        error.InvalidString => return HandleRequestError.InvalidRequest,
+    };
+
+    const removed = main_mapping.swapRemove(key);
+
+    const response_format = "del {s} -> {}";
+
+    var response_buf: [protocol.k_max_msg]u8 = undefined;
+    const response = std.fmt.bufPrint(&response_buf, response_format, .{ key, removed }) catch |err|
+        switch (err) {
+        error.NoSpaceLeft => unreachable,
+    };
+
+    const written = try protocol.createPayload(response, conn.wbuf[conn.wbuf_size..]);
+    conn.wbuf_size += written;
+}
+
 fn parseRequest(conn: *Conn, buf: []u8, main_mapping: *MainMapping) void {
 
     // Support get, set, del
@@ -155,6 +181,9 @@ fn parseRequest(conn: *Conn, buf: []u8, main_mapping: *MainMapping) void {
             err = e;
         },
         .Set => handleSetCommand(conn, buf, main_mapping) catch |e| {
+            err = e;
+        },
+        .Delete => handleDeleteCommand(conn, buf, main_mapping) catch |e| {
             err = e;
         },
         .Unknown => handleUnknownCommand(conn, buf),

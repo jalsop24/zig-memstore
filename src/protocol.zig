@@ -7,6 +7,7 @@ pub const PayloadCreationError = error{MessageTooLong};
 pub const Command = enum {
     Get,
     Set,
+    Delete,
     Unknown,
 };
 
@@ -35,6 +36,7 @@ fn commandIs(buf: []const u8, command: []const u8) bool {
 pub fn parseCommand(buf: []u8) Command {
     if (commandIs(buf, "get")) return Command.Get;
     if (commandIs(buf, "set")) return Command.Set;
+    if (commandIs(buf, "del")) return Command.Delete;
 
     return Command.Unknown;
 }
