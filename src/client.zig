@@ -2,12 +2,15 @@ const std = @import("std");
 
 const protocol = @import("protocol.zig");
 
-fn getPortFromArgs(args: *std.process.ArgIterator) !u16 {
+fn getAddressFromArgs(args: *std.process.ArgIterator) !std.net.Address {
     const raw_port = args.next() orelse {
         std.log.info("Expected port as a command line argument\n", .{});
         return error.NoPort;
     };
-    return try std.fmt.parseInt(u16, raw_port, 10);
+
+    const port = try std.fmt.parseInt(u16, raw_port, 10);
+
+    return std.net.Address.initIp4(.{ 127, 0, 0, 1 }, port);
 }
 
 fn receiveMessage(fd: std.posix.socket_t, mbuf: *[protocol.k_max_msg]u8) !usize {
@@ -79,14 +82,13 @@ pub fn main() !void {
 
     // Skip first argument (path to program)
     _ = args.skip();
-    const port = try getPortFromArgs(&args);
-    const localhost = std.net.Address.initIp4(.{ 127, 0, 0, 1 }, port);
+    const addr = try getAddressFromArgs(&args);
 
-    std.log.info("Connecting to {}", .{localhost});
-    const stream = std.net.tcpConnectToAddress(localhost) catch |err| {
+    std.log.info("Connecting to {}", .{addr});
+    const stream = std.net.tcpConnectToAddress(addr) catch |err| {
         switch (@TypeOf(err)) {
             std.net.TcpConnectToAddressError => {
-                std.log.info("Failed to connect to {}", .{localhost});
+                std.log.info("Failed to connect to {}", .{addr});
                 return;
             },
             else => {
