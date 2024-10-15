@@ -3,14 +3,22 @@ const std = @import("std");
 const protocol = @import("protocol.zig");
 
 fn getAddressFromArgs(args: *std.process.ArgIterator) !std.net.Address {
-    const raw_port = args.next() orelse {
-        std.log.info("Expected port as a command line argument\n", .{});
-        return error.NoPort;
+    const raw_sock_addr = args.next() orelse {
+        std.log.info("Expected address / port as a command line argument\n", .{});
+        return error.NoAddress;
     };
 
-    const port = try std.fmt.parseInt(u16, raw_port, 10);
+    var i: usize = 0;
+    for (raw_sock_addr, 0..) |char, j| {
+        if (char == ':') {
+            i = j;
+            break;
+        }
+    }
 
-    return std.net.Address.initIp4(.{ 127, 0, 0, 1 }, port);
+    const raw_port = raw_sock_addr[i + 1 ..];
+    const port = try std.fmt.parseInt(u16, raw_port, 10);
+    return std.net.Address.parseIp4(raw_sock_addr[0..i], port);
 }
 
 fn receiveMessage(fd: std.posix.socket_t, mbuf: *[protocol.k_max_msg]u8) !usize {
