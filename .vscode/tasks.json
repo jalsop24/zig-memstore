@@ -8,6 +8,17 @@
             "type": "shell",
             "command": "zig build",
             "group": "build",
+        },
+        {
+            "label": "build zig test",
+            "type": "shell",
+            "command": "zig",
+            "args": [
+                "test",
+                "-femit-bin=zig-out/bin/${fileBasenameNoExtension}-test",
+                "--test-no-exec",
+                "${relativeFile}",
+            ]
         }
     ]
 }
