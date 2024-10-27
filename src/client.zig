@@ -21,65 +21,6 @@ fn getAddressFromArgs(args: *std.process.ArgIterator) !std.net.Address {
     return std.net.Address.parseIp4(raw_sock_addr[0..i], port);
 }
 
-fn receiveMessage(fd: std.posix.socket_t, mbuf: *[protocol.k_max_msg]u8) !usize {
-    const header_len = try std.posix.read(fd, mbuf[0..4]);
-    if (header_len < 4) {
-        std.log.info("Unable to read full header. {} bytes", .{header_len});
-        return error.MessageTooShort;
-    }
-    const m_len = std.mem.readPackedInt(u32, mbuf[0..4], 0, .little);
-    if (m_len > protocol.k_max_msg) {
-        std.log.info("Invalid response {}", .{m_len});
-        return error.InvalidResponse;
-    }
-    const m_read = try std.posix.read(fd, mbuf[0..m_len]);
-    return m_read;
-}
-
-fn readWord(buf: []u8, out_buf: []u8) !struct { u16, u32 } {
-    std.log.debug("Read word from buf '{s}'", .{buf});
-
-    var start: u32 = 0;
-    // Consume all leading whitespace
-    for (0..buf.len) |i| {
-        if (buf[i] != ' ') {
-            start = @intCast(i);
-            break;
-        }
-    }
-    // What if that loop gets all the way to the end of the buffer?
-    var end: u32 = 0;
-    for (start..buf.len) |i| {
-        std.log.debug("char {c}", .{buf[i]});
-        end = @intCast(i);
-        if (buf[i] == ' ' or buf[i] == '\n') {
-            end -= 1;
-            break;
-        }
-
-        if (i - start > out_buf.len or i - start > 2 ^ 16 - 1) return error.WordTooLong;
-
-        // Copy key char into output buffer
-        out_buf[i - start] = buf[i];
-    }
-
-    return .{ @intCast(end + 1 - start), end + 1 };
-}
-
-fn parseWord(buf: []u8, out_buf: []u8) !struct { u16, u32 } {
-    const w_len, const bytes_read = try readWord(buf, out_buf[2..]);
-
-    std.mem.writePackedInt(
-        u16,
-        out_buf[0..2],
-        0,
-        w_len,
-        .little,
-    );
-
-    return .{ w_len, bytes_read };
-}
-
 pub fn main() !void {
     var gpa_alloc = std.heap.GeneralPurposeAllocator(.{}){};
     defer std.debug.assert(gpa_alloc.deinit() == .ok);
@@ -124,80 +65,13 @@ pub fn main() !void {
 
         switch (protocol.parseCommand(message[0..3])) {
             .Get => {
-                const out_buf = wbuf[4..];
-                @memcpy(out_buf[0..3], "get");
-
-                // Parse the key back into the input buffer
-                const key_len, _ = try parseWord(message[3..], out_buf[3..]);
-                std.log.info("Key length {}", .{key_len});
-
-                // 3 Bytes for command
-                // 2 bytes for key length
-                // key_len bytes for key content
-                const m_len: u32 = 3 + 2 + key_len;
-
-                std.mem.writePackedInt(
-                    u32,
-                    wbuf[0..4],
-                    0,
-                    m_len,
-                    .little,
-                );
-                wlen = 4 + m_len;
+                wlen = try protocol.createGetReq(message[3..], &wbuf);
             },
             .Set => {
-                const out_buf = wbuf[4..];
-                @memcpy(out_buf[0..3], "set");
-
-                const key_len, const bytes_read = try parseWord(message[3..], out_buf[3..]);
-                std.log.info("Key length {}", .{key_len});
-                std.log.info("Bytes read {}", .{bytes_read});
-
-                // Parse value into out_buffer at 5 + key_len position:
-                // 3 bytes for "set"
-                // 2 bytes for key_len
-                // key_len bytes for key
-                const val_len, _ = try parseWord(message[3 + bytes_read ..], out_buf[5 + key_len ..]);
-                std.log.info("Val length {}", .{val_len});
-
-                // 3 Bytes for command
-                // 2 bytes for key length
-                // key_len bytes for key content
-                // 2 bytes for val length
-                // val_len bytes for val content
-                const m_len: u32 = 3 + 2 + key_len + 2 + val_len;
-
-                std.mem.writePackedInt(
-                    u32,
-                    wbuf[0..4],
-                    0,
-                    m_len,
-                    .little,
-                );
-
-                wlen = 4 + m_len;
+                wlen = try protocol.createSetReq(message[3..], &wbuf);
             },
             .Delete => {
-                const out_buf = wbuf[4..];
-                @memcpy(out_buf[0..3], "del");
-
-                // Parse the key back into the input buffer
-                const key_len, _ = try parseWord(message[3..], out_buf[3..]);
-                std.log.info("Key length {}", .{key_len});
-
-                // 3 Bytes for command
-                // 2 bytes for key length
-                // key_len bytes for key content
-                const m_len: u32 = 3 + 2 + key_len;
-
-                std.mem.writePackedInt(
-                    u32,
-                    wbuf[0..4],
-                    0,
-                    m_len,
-                    .little,
-                );
-                wlen = 4 + m_len;
+                wlen = try protocol.createDelReq(message[3..], &wbuf);
             },
             .Unknown => {
                 std.log.info("Unknown command", .{});
@@ -210,7 +84,7 @@ pub fn main() !void {
         std.log.info("Sending '{0s}' ({0x}) to server, total sent: {1d} bytes", .{ wbuf[4..wlen], size });
 
         var rbuf: [protocol.k_max_msg]u8 = undefined;
-        const len = try receiveMessage(stream.handle, &rbuf);
+        const len = try protocol.receiveMessage(stream.reader().any(), &rbuf);
         std.log.info("Received from server '{s}'", .{rbuf[0..len]});
     }
 }
