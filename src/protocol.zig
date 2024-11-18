@@ -8,6 +8,8 @@ pub const k_max_msg: usize = 4096;
 
 pub const PayloadCreationError = error{MessageTooLong};
 
+pub const MessageBuffer = [len_header_size + k_max_msg]u8;
+
 pub const Command = enum {
     Get,
     Set,

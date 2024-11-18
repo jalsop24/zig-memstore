@@ -3,78 +3,12 @@ const std = @import("std");
 const protocol = @import("protocol.zig");
 const cli = @import("cli.zig");
 const String = @import("types.zig").String;
+const connection = @import("connection.zig");
+const testing = @import("testing.zig");
 
-const MessageBuffer = [protocol.len_header_size + protocol.k_max_msg]u8;
-
-const ConnState = struct {
-    /// The different states that a connection can be in
-    state: enum {
-        /// Request
-        REQ,
-        /// Response
-        RES,
-        /// End of connection
-        END,
-    } = .REQ,
-
-    // Read buffer
-    rbuf_size: usize = 0,
-    rbuf_cursor: usize = 0,
-    rbuf: MessageBuffer,
-
-    // Write buffer
-    wbuf_size: usize = 0,
-    wbuf_sent: usize = 0,
-    wbuf: MessageBuffer,
-
-    pub fn init(allocator: std.mem.Allocator) !*ConnState {
-        const conn_state = try allocator.create(ConnState);
-        errdefer allocator.destroy(conn_state);
-
-        conn_state.state = .REQ;
-
-        conn_state.rbuf_size = 0;
-        conn_state.rbuf_cursor = 0;
-
-        conn_state.wbuf_size = 0;
-        conn_state.wbuf_sent = 0;
-
-        return conn_state;
-    }
-
-    pub fn deinit(self: *ConnState, allocator: std.mem.Allocator) void {
-        allocator.destroy(self);
-    }
-};
-
-const GenericConn = struct {
-    ptr: *anyopaque,
-    state: *ConnState,
-
-    closeFn: *const fn (*anyopaque) void,
-    writeFn: *const fn (*anyopaque, []const u8) WriteError!usize,
-    readFn: *const fn (*anyopaque, []u8) ReadError!usize,
-
-    const Self = @This();
-
-    pub const WriteError = anyerror;
-    pub const Writer = std.io.Writer(*Self, WriteError, write);
-
-    pub const ReadError = anyerror;
-    pub const Reader = std.io.Reader(*Self, ReadError, read);
-
-    pub fn close(self: *const Self) void {
-        return self.closeFn(self.ptr);
-    }
-
-    pub fn write(self: *const Self, bytes: []const u8) WriteError!usize {
-        return self.writeFn(self.ptr, bytes);
-    }
-
-    pub fn read(self: *const Self, buffer: []u8) ReadError!usize {
-        return self.readFn(self.ptr, buffer);
-    }
-};
+const ConnState = connection.ConnState;
+const GenericConn = connection.GenericConn;
+const MessageBuffer = protocol.MessageBuffer;
 
 const NetConn = struct {
     stream: std.net.Stream,
@@ -516,64 +450,13 @@ pub fn main() !void {
     }
 }
 
-const TestConn = struct {
-    const FixedBufferStream = std.io.FixedBufferStream([]u8);
-
-    client_to_server_stream: *FixedBufferStream,
-    server_to_client_stream: *FixedBufferStream,
-
-    state: *ConnState,
-
-    pub fn close(ptr: *anyopaque) void {
-        _ = ptr;
-    }
-
-    pub fn writeFn(ptr: *anyopaque, bytes: []const u8) !usize {
-        var self: *TestConn = @ptrCast(@alignCast(ptr));
-        const writer = self.server_to_client_stream.writer();
-        return writer.write(bytes);
-    }
-
-    pub fn readFn(ptr: *anyopaque, buffer: []u8) !usize {
-        var self: *TestConn = @ptrCast(@alignCast(ptr));
-        const reader = self.client_to_server_stream.reader();
-        return reader.read(buffer);
-    }
-
-    pub fn connection(self: *TestConn) GenericConn {
-        return .{
-            .ptr = self,
-            .state = self.state,
-            .closeFn = TestConn.close,
-            .writeFn = TestConn.writeFn,
-            .readFn = TestConn.readFn,
-        };
-    }
-};
-
 test "simple get req" {
     const allocator = std.testing.allocator;
     var mapping = MainMapping.init(allocator);
     defer mapping.deinit();
 
-    const rbuf: MessageBuffer = undefined;
-    const wbuf: MessageBuffer = undefined;
-    var conn_state: ConnState = .{
-        .rbuf = rbuf,
-        .wbuf = wbuf,
-    };
-
-    var cs_stream_buf: [1000]u8 = undefined;
-    var cs_stream = std.io.fixedBufferStream(&cs_stream_buf);
-
-    var sc_stream_buf: [1000]u8 = undefined;
-    var sc_stream = std.io.fixedBufferStream(&sc_stream_buf);
-
-    var test_conn: TestConn = .{
-        .state = &conn_state,
-        .client_to_server_stream = &cs_stream,
-        .server_to_client_stream = &sc_stream,
-    };
+    const client = try testing.TestClient.init(allocator);
+    defer client.deinit();
 
     // Create request
     var req_buf: [100]u8 = undefined;
@@ -582,16 +465,15 @@ test "simple get req" {
 
     std.debug.print("req_len - {}\n", .{req_len});
     // "Send" the request from the client to server
-    _ = try cs_stream.write(req_buf[0..req_len]);
-    try cs_stream.seekTo(0);
+    try client.send_req(req_buf[0..req_len]);
 
-    const conn = test_conn.connection();
+    const conn = client.connection();
+    std.debug.print("connection io\n", .{});
     try connectionIo(conn, &mapping);
 
     // "Receive" the response from the server to the client
-    try sc_stream.seekTo(0);
     var res_buf: [100]u8 = undefined;
-    const res_len = try protocol.receiveMessage(sc_stream.reader().any(), &res_buf);
+    const res_len = try client.get_res(&res_buf);
 
     // TODO: Parse response properly as it contains length header
     try std.testing.expectEqualStrings("get key -> null", res_buf[0..res_len]);
