@@ -23,19 +23,6 @@ pub const ConnState = struct {
     wbuf_size: usize = 0,
     wbuf_sent: usize = 0,
     wbuf: MessageBuffer = undefined,
-
-    pub fn init(allocator: std.mem.Allocator) !*ConnState {
-        const conn_state = try allocator.create(ConnState);
-        errdefer allocator.destroy(conn_state);
-
-        conn_state.* = ConnState{};
-
-        return conn_state;
-    }
-
-    pub fn deinit(self: *ConnState, allocator: std.mem.Allocator) void {
-        allocator.destroy(self);
-    }
 };
 
 pub const GenericConn = struct {
