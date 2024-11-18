@@ -56,6 +56,10 @@ pub fn main() !void {
                 wlen = try protocol.createDelReq(message[3..], &wbuf);
             },
             .Unknown => {
+                if (std.mem.eql(u8, message, "exit")) {
+                    break;
+                }
+
                 std.log.info("Unknown command", .{});
                 wlen = try protocol.createPayload(message, &wbuf);
             },
