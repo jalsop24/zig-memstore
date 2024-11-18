@@ -1,81 +1,143 @@
 const std = @import("std");
 
 const protocol = @import("protocol.zig");
+const cli = @import("cli.zig");
+const String = @import("types.zig").String;
 
-/// The different states that a connection can be in
-const State = enum {
-    /// Request
-    REQ,
-    /// Response
-    RES,
-    /// End of connection
-    END,
-};
+const MessageBuffer = [protocol.len_header_size + protocol.k_max_msg]u8;
 
-const Conn = struct {
-    stream: std.net.Stream,
-    state: State = .REQ,
+const ConnState = struct {
+    /// The different states that a connection can be in
+    state: enum {
+        /// Request
+        REQ,
+        /// Response
+        RES,
+        /// End of connection
+        END,
+    } = .REQ,
+
     // Read buffer
     rbuf_size: usize = 0,
     rbuf_cursor: usize = 0,
-    rbuf: [4 + protocol.k_max_msg]u8,
+    rbuf: MessageBuffer,
+
     // Write buffer
     wbuf_size: usize = 0,
     wbuf_sent: usize = 0,
-    wbuf: [4 + protocol.k_max_msg]u8,
+    wbuf: MessageBuffer,
 
-    pub fn create(allocator: std.mem.Allocator, stream: std.net.Stream) !*Conn {
-        const conn = try allocator.create(Conn);
+    pub fn init(allocator: std.mem.Allocator) !*ConnState {
+        const conn_state = try allocator.create(ConnState);
+        errdefer allocator.destroy(conn_state);
 
-        conn.* = Conn{
-            .stream = stream,
-            .rbuf = conn.rbuf,
-            .wbuf = conn.wbuf,
-        };
-        return conn;
+        conn_state.state = .REQ;
+
+        conn_state.rbuf_size = 0;
+        conn_state.rbuf_cursor = 0;
+
+        conn_state.wbuf_size = 0;
+        conn_state.wbuf_sent = 0;
+
+        return conn_state;
+    }
+
+    pub fn deinit(self: *ConnState, allocator: std.mem.Allocator) void {
+        allocator.destroy(self);
     }
 };
 
-const String = struct {
-    content: []u8,
+const GenericConn = struct {
+    ptr: *anyopaque,
+    state: *ConnState,
 
-    pub fn init(allocator: std.mem.Allocator, content: []u8) !*String {
-        var new = try allocator.create(String);
-        errdefer allocator.destroy(new);
+    closeFn: *const fn (*anyopaque) void,
+    writeFn: *const fn (*anyopaque, []const u8) WriteError!usize,
+    readFn: *const fn (*anyopaque, []u8) ReadError!usize,
 
-        const bytes = try allocator.alloc(u8, content.len);
-        new.content = bytes;
+    const Self = @This();
 
-        @memcpy(new.content, content);
-        return new;
+    pub const WriteError = anyerror;
+    pub const Writer = std.io.Writer(*Self, WriteError, write);
+
+    pub const ReadError = anyerror;
+    pub const Reader = std.io.Reader(*Self, ReadError, read);
+
+    pub fn close(self: *const Self) void {
+        return self.closeFn(self.ptr);
     }
 
-    pub fn deinit(self: *String, allocator: std.mem.Allocator) void {
-        allocator.free(self.content);
+    pub fn write(self: *const Self, bytes: []const u8) WriteError!usize {
+        return self.writeFn(self.ptr, bytes);
+    }
+
+    pub fn read(self: *const Self, buffer: []u8) ReadError!usize {
+        return self.readFn(self.ptr, buffer);
+    }
+};
+
+const NetConn = struct {
+    stream: std.net.Stream,
+    state: *ConnState,
+
+    pub fn close(ptr: *anyopaque) void {
+        var self: *NetConn = @ptrCast(@alignCast(ptr));
+        self.stream.close();
+    }
+
+    pub fn writeFn(ptr: *anyopaque, bytes: []const u8) !usize {
+        var self: *NetConn = @ptrCast(@alignCast(ptr));
+        return self.stream.writer().write(bytes);
+    }
+
+    pub fn readFn(ptr: *anyopaque, buffer: []u8) !usize {
+        var self: *NetConn = @ptrCast(@alignCast(ptr));
+        return self.stream.reader().read(buffer);
+    }
+
+    pub fn connection(self: *NetConn) GenericConn {
+        return .{
+            .ptr = self,
+            .state = self.state,
+            .closeFn = NetConn.close,
+            .writeFn = NetConn.writeFn,
+            .readFn = NetConn.readFn,
+        };
+    }
+
+    pub fn init(allocator: std.mem.Allocator, stream: std.net.Stream) !*NetConn {
+        const conn_state = try ConnState.init(allocator);
+        errdefer conn_state.deinit(allocator);
+
+        var net_conn = try allocator.create(NetConn);
+        net_conn.stream = stream;
+        net_conn.state = conn_state;
+
+        return net_conn;
+    }
+
+    pub fn deinit(self: *NetConn, allocator: std.mem.Allocator) void {
+        self.state.deinit(allocator);
         allocator.destroy(self);
     }
 };
 
 const MainMapping = std.StringArrayHashMap(*String);
 
-fn getPortFromArgs(args: *std.process.ArgIterator) !u16 {
-    const raw_port = args.next() orelse {
-        std.log.info("Expected port as a command line argument\n", .{});
-        return error.NoPort;
-    };
-    return try std.fmt.parseInt(u16, raw_port, 10);
-}
-
 const HandleRequestError = error{InvalidRequest} || protocol.PayloadCreationError;
 
-fn handleUnknownCommand(conn: *Conn, buf: []u8) void {
-    std.log.info("Client says '{s}'", .{buf});
+fn handleUnknownCommand(conn_state: *ConnState, bytes: []const u8) void {
+    std.log.info("Client says '{s}'", .{bytes});
     // Generate echo response
-    @memcpy(conn.wbuf[0 .. 4 + buf.len], conn.rbuf[conn.rbuf_cursor .. conn.rbuf_cursor + 4 + buf.len]);
-    conn.wbuf_size = 4 + buf.len;
+    @memcpy(
+        conn_state.wbuf[0 .. protocol.len_header_size + bytes.len],
+        conn_state.rbuf[conn_state.rbuf_cursor..][0 .. protocol.len_header_size + bytes.len],
+    );
+
+    conn_state.wbuf_size = protocol.len_header_size + bytes.len;
 }
 
-fn handleGetCommand(conn: *Conn, buf: []u8, main_mapping: *MainMapping) HandleRequestError!void {
+fn handleGetCommand(conn_state: *ConnState, buf: []u8, main_mapping: *MainMapping) HandleRequestError!void {
     std.log.info("Get command '{0s}' ({0x})", .{buf});
 
     if (buf.len < 5) {
@@ -83,11 +145,12 @@ fn handleGetCommand(conn: *Conn, buf: []u8, main_mapping: *MainMapping) HandleRe
         return HandleRequestError.InvalidRequest;
     }
 
-    const key_len = std.mem.readPackedInt(u16, buf[3..5], 0, .little);
-    if (key_len != buf.len - 5) {
-        return HandleRequestError.InvalidRequest;
-    }
-    const key = buf[5 .. 5 + key_len];
+    const key = protocol.parseString(buf[3..]) catch |err| switch (err) {
+        error.InvalidString => {
+            std.log.debug("Failed to parse key {s}", .{buf[3..]});
+            return HandleRequestError.InvalidRequest;
+        },
+    };
 
     std.log.info("Get key '{s}'", .{key});
     const raw_value = (main_mapping.get(key));
@@ -100,17 +163,17 @@ fn handleGetCommand(conn: *Conn, buf: []u8, main_mapping: *MainMapping) HandleRe
 
     const response_format = "get {s} -> {s}";
 
-    var response_buf: [protocol.k_max_msg]u8 = undefined;
+    var response_buf: MessageBuffer = undefined;
     const response = std.fmt.bufPrint(&response_buf, response_format, .{ key, value }) catch |err|
         switch (err) {
         error.NoSpaceLeft => unreachable,
     };
 
-    const written = try protocol.createPayload(response, conn.wbuf[conn.wbuf_size..]);
-    conn.wbuf_size += written;
+    const written = try protocol.createPayload(response, conn_state.wbuf[conn_state.wbuf_size..]);
+    conn_state.wbuf_size += written;
 }
 
-fn handleSetCommand(conn: *Conn, buf: []u8, main_mapping: *MainMapping) HandleRequestError!void {
+fn handleSetCommand(conn_state: *ConnState, buf: []u8, main_mapping: *MainMapping) HandleRequestError!void {
     std.log.info("Set command '{0s}' ({0x})", .{buf});
 
     if (buf.len < 5) {
@@ -134,11 +197,13 @@ fn handleSetCommand(conn: *Conn, buf: []u8, main_mapping: *MainMapping) HandleRe
     };
 
     const new_key = main_mapping.allocator.alloc(u8, key.len) catch return HandleRequestError.InvalidRequest;
+    errdefer main_mapping.allocator.free(new_key);
     @memcpy(new_key, key);
 
     const new_val = String.init(main_mapping.allocator, value) catch |err| switch (err) {
         error.OutOfMemory => return HandleRequestError.InvalidRequest,
     };
+    errdefer new_val.deinit(main_mapping.allocator);
 
     main_mapping.put(new_key, new_val) catch {
         std.log.debug("Failed to put into mapping {any}", .{new_val});
@@ -146,11 +211,11 @@ fn handleSetCommand(conn: *Conn, buf: []u8, main_mapping: *MainMapping) HandleRe
     };
 
     const response = "created";
-    const written = protocol.createPayload(response, conn.wbuf[conn.wbuf_size..]) catch unreachable;
-    conn.wbuf_size += written;
+    const written = protocol.createPayload(response, conn_state.wbuf[conn_state.wbuf_size..]) catch unreachable;
+    conn_state.wbuf_size += written;
 }
 
-fn handleDeleteCommand(conn: *Conn, buf: []u8, main_mapping: *MainMapping) HandleRequestError!void {
+fn handleDeleteCommand(conn_state: *ConnState, buf: []const u8, main_mapping: *MainMapping) HandleRequestError!void {
     std.log.info("Delete command '{0s}' (0x)", .{buf});
 
     if (buf.len < 5) {
@@ -166,35 +231,39 @@ fn handleDeleteCommand(conn: *Conn, buf: []u8, main_mapping: *MainMapping) Handl
 
     const response_format = "del {s} -> {}";
 
-    var response_buf: [protocol.k_max_msg]u8 = undefined;
-    const response = std.fmt.bufPrint(&response_buf, response_format, .{ key, removed }) catch |err|
+    var response_buf: MessageBuffer = undefined;
+    const response = std.fmt.bufPrint(
+        &response_buf,
+        response_format,
+        .{ key, removed },
+    ) catch |err|
         switch (err) {
         error.NoSpaceLeft => unreachable,
     };
 
-    const written = try protocol.createPayload(response, conn.wbuf[conn.wbuf_size..]);
-    conn.wbuf_size += written;
+    const written = try protocol.createPayload(response, conn_state.wbuf[conn_state.wbuf_size..]);
+    conn_state.wbuf_size += written;
 }
 
-fn parseRequest(conn: *Conn, buf: []u8, main_mapping: *MainMapping) void {
+fn parseRequest(conn_state: *ConnState, buf: []u8, main_mapping: *MainMapping) void {
 
     // Support get, set, del
 
     // first 3 bytes are the type of command
-    if (buf.len < 3) return handleUnknownCommand(conn, buf);
+    if (buf.len < 3) return handleUnknownCommand(conn_state, buf);
 
     var err: ?HandleRequestError = null;
     switch (protocol.parseCommand(buf[0..3])) {
-        .Get => handleGetCommand(conn, buf, main_mapping) catch |e| {
+        .Get => handleGetCommand(conn_state, buf, main_mapping) catch |e| {
             err = e;
         },
-        .Set => handleSetCommand(conn, buf, main_mapping) catch |e| {
+        .Set => handleSetCommand(conn_state, buf, main_mapping) catch |e| {
             err = e;
         },
-        .Delete => handleDeleteCommand(conn, buf, main_mapping) catch |e| {
+        .Delete => handleDeleteCommand(conn_state, buf, main_mapping) catch |e| {
             err = e;
         },
-        .Unknown => handleUnknownCommand(conn, buf),
+        .Unknown => handleUnknownCommand(conn_state, buf),
     }
 
     if (err != null) {
@@ -202,20 +271,21 @@ fn parseRequest(conn: *Conn, buf: []u8, main_mapping: *MainMapping) void {
             // Length check has already been completed
             error.MessageTooLong => unreachable,
             error.InvalidRequest => {
-                const written = protocol.createPayload("Invalid request", conn.wbuf[conn.wbuf_size..]) catch unreachable;
-                conn.wbuf_size += written;
+                const written = protocol.createPayload("Invalid request", conn_state.wbuf[conn_state.wbuf_size..]) catch unreachable;
+                conn_state.wbuf_size += written;
             },
         }
     }
 }
 
-fn tryOneRequest(conn: *Conn, main_mapping: *MainMapping) bool {
-    if (conn.rbuf_size < 4) {
+fn tryOneRequest(conn: GenericConn, main_mapping: *MainMapping) bool {
+    var conn_state = conn.state;
+    if (conn_state.rbuf_size < protocol.len_header_size) {
         // Not enough data in the buffer, try after the next poll
         return false;
     }
 
-    const length_header = conn.rbuf[conn.rbuf_cursor .. conn.rbuf_cursor + 4];
+    const length_header = conn_state.rbuf[conn_state.rbuf_cursor..][0..protocol.len_header_size];
     const len = std.mem.readPackedInt(
         u32,
         length_header,
@@ -226,113 +296,121 @@ fn tryOneRequest(conn: *Conn, main_mapping: *MainMapping) bool {
     if (len > protocol.k_max_msg) {
         std.log.debug("Too long - len = {}", .{len});
         std.log.debug("Message: {x}", .{length_header});
-        conn.state = .END;
+        conn_state.state = .END;
         return false;
     }
 
-    if (conn.rbuf_size < 4 + len) {
+    if (conn_state.rbuf_size < protocol.len_header_size + len) {
         // Not enough data in the buffer
         return false;
     }
 
-    const message = conn.rbuf[conn.rbuf_cursor + 4 .. conn.rbuf_cursor + 4 + len];
-    parseRequest(conn, message, main_mapping);
+    const message = conn_state.rbuf[conn_state.rbuf_cursor + protocol.len_header_size ..][0..len];
+    parseRequest(conn_state, message, main_mapping);
 
     // 'Remove' request from read buffer
-    const remaining_bytes = conn.rbuf_size - 4 - len;
-    conn.rbuf_size = remaining_bytes;
+    const remaining_bytes = conn_state.rbuf_size - protocol.len_header_size - len;
+    conn_state.rbuf_size = remaining_bytes;
     // Update read cursor position
-    conn.rbuf_cursor = conn.rbuf_cursor + 4 + len;
+    conn_state.rbuf_cursor = conn_state.rbuf_cursor + protocol.len_header_size + len;
 
     // Trigger response logic
-    conn.state = .RES;
+    conn_state.state = .RES;
     stateRes(conn);
 
-    return (conn.state == .REQ);
+    return (conn_state.state == .REQ);
 }
 
-fn tryFillBuffer(conn: *Conn, main_mapping: *MainMapping) bool {
+fn tryFillBuffer(conn: GenericConn, main_mapping: *MainMapping) bool {
     // Reset buffer so that it is filled right from the start
+
+    var conn_state = conn.state;
     std.mem.copyForwards(
         u8,
-        conn.rbuf[0..conn.rbuf_size],
-        conn.rbuf[conn.rbuf_cursor .. conn.rbuf_cursor + conn.rbuf_size],
+        conn_state.rbuf[0..conn_state.rbuf_size],
+        conn_state.rbuf[conn_state.rbuf_cursor .. conn_state.rbuf_cursor + conn_state.rbuf_size],
     );
-    conn.rbuf_cursor = 0;
+    conn_state.rbuf_cursor = 0;
 
-    const num_read = conn.stream.read(conn.rbuf[conn.rbuf_size..]) catch |err|
+    const num_read = conn.read(conn_state.rbuf[conn_state.rbuf_size..]) catch |err|
         switch (err) {
         // WouldBlock corresponds to EAGAIN signal
         error.WouldBlock => return false,
         else => {
             std.log.debug("read error {s}", .{@errorName(err)});
-            conn.state = .END;
+            conn_state.state = .END;
             return false;
         },
     };
 
     if (num_read == 0) {
-        if (conn.rbuf_size > 0) {
+        if (conn_state.rbuf_size > 0) {
             std.log.debug("Unexpected EOF", .{});
         } else {
             std.log.debug("EOF", .{});
         }
-        conn.state = .END;
+        conn_state.state = .END;
         return false;
     }
 
-    conn.rbuf_size += num_read;
-    std.debug.assert(conn.rbuf_size < conn.rbuf.len);
+    conn_state.rbuf_size += num_read;
+    std.debug.assert(conn_state.rbuf_size < conn_state.rbuf.len);
 
     // Parse multiple requests as more than one may be sent at a time
     while (tryOneRequest(conn, main_mapping)) {}
-    return (conn.state == .REQ);
+    return (conn_state.state == .REQ);
 }
 
-fn stateReq(conn: *Conn, main_mapping: *MainMapping) void {
+fn stateReq(conn: GenericConn, main_mapping: *MainMapping) void {
     while (tryFillBuffer(conn, main_mapping)) {}
 }
 
-fn tryFlushBuffer(conn: *Conn) bool {
-    conn.stream.writeAll(conn.wbuf[0..conn.wbuf_size]) catch |err|
+fn tryFlushBuffer(conn: GenericConn) bool {
+    var conn_state = conn.state;
+
+    _ = conn.write(conn_state.wbuf[0..conn_state.wbuf_size]) catch |err|
         switch (err) {
         error.WouldBlock => return false,
         else => {
             std.log.debug("write error {s}", .{@errorName(err)});
-            conn.state = .END;
+            conn_state.state = .END;
             return false;
         },
     };
 
-    conn.state = .REQ;
-    conn.wbuf_sent = 0;
-    conn.wbuf_size = 0;
+    conn_state.state = .REQ;
+    conn_state.wbuf_sent = 0;
+    conn_state.wbuf_size = 0;
     return false;
 }
 
-fn stateRes(conn: *Conn) void {
+fn stateRes(conn: GenericConn) void {
     while (tryFlushBuffer(conn)) {}
 }
 
-fn connectionIo(conn: *Conn, main_mapping: *MainMapping) !void {
-    switch (conn.state) {
+fn connectionIo(conn: GenericConn, main_mapping: *MainMapping) !void {
+    switch (conn.state.state) {
         .REQ => stateReq(conn, main_mapping),
         .RES => stateRes(conn),
         .END => return error.InvalidConnection,
     }
 }
 
-fn acceptNewConnection(fd2conn: *std.AutoArrayHashMap(std.posix.socket_t, *Conn), server: *std.net.Server) !std.net.Server.Connection {
+fn acceptNewConnection(fd2conn: *std.AutoArrayHashMap(std.posix.socket_t, *NetConn), server: *std.net.Server) !void {
     const client = try server.accept();
     errdefer client.stream.close();
     std.log.info("Connection received! {}", .{client.address});
 
-    const conn = try Conn.create(fd2conn.allocator, client.stream);
-    errdefer fd2conn.allocator.destroy(conn);
+    const conn = try NetConn.init(
+        fd2conn.allocator,
+        client.stream,
+    );
+    errdefer {
+        conn.deinit(fd2conn.allocator);
+        fd2conn.allocator.destroy(conn);
+    }
 
     try fd2conn.put(conn.stream.handle, conn);
-
-    return client;
 }
 
 pub fn main() !void {
@@ -345,7 +423,7 @@ pub fn main() !void {
 
     // Skip first argument (path to program)
     _ = args.skip();
-    const port = try getPortFromArgs(&args);
+    const port = try cli.getPortFromArgs(&args);
 
     const address = std.net.Address.initIp4(.{ 0, 0, 0, 0 }, port);
     var server = try address.listen(.{
@@ -357,14 +435,14 @@ pub fn main() !void {
     var poll_args = std.ArrayList(std.posix.pollfd).init(allocator);
     defer poll_args.deinit();
 
-    var fd2conn = std.AutoArrayHashMap(std.posix.socket_t, *Conn).init(allocator);
+    var fd2conn = std.AutoArrayHashMap(std.posix.socket_t, *NetConn).init(allocator);
     defer {
         // Make sure to clean up any lasting connections before
         // deiniting the hashmap
         std.log.info("Clean up connections", .{});
         for (fd2conn.values()) |conn| {
-            conn.stream.close();
-            allocator.destroy(conn);
+            conn.connection().close();
+            conn.deinit(allocator);
         }
         fd2conn.deinit();
     }
@@ -392,7 +470,7 @@ pub fn main() !void {
         // Create poll args for all client connections
         for (fd2conn.values()) |conn| {
             var events: i16 = undefined;
-            if (conn.state == .REQ) {
+            if (conn.state.state == .REQ) {
                 events = std.posix.POLL.IN; //| std.posix.POLL.ERR;
             } else {
                 events = std.posix.POLL.OUT; //| std.posix.POLL.ERR;
@@ -420,13 +498,13 @@ pub fn main() !void {
             if (pfd.revents == 0) continue;
 
             const conn = fd2conn.get(pfd.fd).?;
-            try connectionIo(conn, &main_mapping);
+            try connectionIo(conn.connection(), &main_mapping);
 
-            if (conn.state == .END) {
+            if (conn.state.state == .END) {
                 std.log.info("Remove connection", .{});
-                conn.stream.close();
+                conn.connection().close();
                 _ = fd2conn.swapRemove(pfd.fd);
-                allocator.destroy(conn);
+                conn.deinit(allocator);
             }
         }
 
@@ -436,4 +514,85 @@ pub fn main() !void {
             _ = try acceptNewConnection(&fd2conn, &server);
         }
     }
+}
+
+const TestConn = struct {
+    const FixedBufferStream = std.io.FixedBufferStream([]u8);
+
+    client_to_server_stream: *FixedBufferStream,
+    server_to_client_stream: *FixedBufferStream,
+
+    state: *ConnState,
+
+    pub fn close(ptr: *anyopaque) void {
+        _ = ptr;
+    }
+
+    pub fn writeFn(ptr: *anyopaque, bytes: []const u8) !usize {
+        var self: *TestConn = @ptrCast(@alignCast(ptr));
+        const writer = self.server_to_client_stream.writer();
+        return writer.write(bytes);
+    }
+
+    pub fn readFn(ptr: *anyopaque, buffer: []u8) !usize {
+        var self: *TestConn = @ptrCast(@alignCast(ptr));
+        const reader = self.client_to_server_stream.reader();
+        return reader.read(buffer);
+    }
+
+    pub fn connection(self: *TestConn) GenericConn {
+        return .{
+            .ptr = self,
+            .state = self.state,
+            .closeFn = TestConn.close,
+            .writeFn = TestConn.writeFn,
+            .readFn = TestConn.readFn,
+        };
+    }
+};
+
+test "simple get req" {
+    const allocator = std.testing.allocator;
+    var mapping = MainMapping.init(allocator);
+    defer mapping.deinit();
+
+    const rbuf: MessageBuffer = undefined;
+    const wbuf: MessageBuffer = undefined;
+    var conn_state: ConnState = .{
+        .rbuf = rbuf,
+        .wbuf = wbuf,
+    };
+
+    var cs_stream_buf: [1000]u8 = undefined;
+    var cs_stream = std.io.fixedBufferStream(&cs_stream_buf);
+
+    var sc_stream_buf: [1000]u8 = undefined;
+    var sc_stream = std.io.fixedBufferStream(&sc_stream_buf);
+
+    var test_conn: TestConn = .{
+        .state = &conn_state,
+        .client_to_server_stream = &cs_stream,
+        .server_to_client_stream = &sc_stream,
+    };
+
+    // Create request
+    var req_buf: [100]u8 = undefined;
+    const test_message: []const u8 = "key";
+    const req_len = try protocol.createGetReq(test_message, &req_buf);
+
+    std.debug.print("req_len - {}\n", .{req_len});
+    // "Send" the request from the client to server
+    _ = try cs_stream.write(req_buf[0..req_len]);
+    try cs_stream.seekTo(0);
+
+    const conn = test_conn.connection();
+    try connectionIo(conn, &mapping);
+
+    // "Receive" the response from the server to the client
+    try sc_stream.seekTo(0);
+    var res_buf: [100]u8 = undefined;
+    const res_len = try protocol.receiveMessage(sc_stream.reader().any(), &res_buf);
+
+    // TODO: Parse response properly as it contains length header
+    try std.testing.expectEqualStrings("get key -> null", res_buf[0..res_len]);
 }
