@@ -12,7 +12,7 @@ const MessageBuffer = protocol.MessageBuffer;
 
 const NetConn = struct {
     stream: std.net.Stream,
-    state: *ConnState,
+    state: ConnState,
 
     pub fn close(ptr: *anyopaque) void {
         var self: *NetConn = @ptrCast(@alignCast(ptr));
@@ -32,7 +32,7 @@ const NetConn = struct {
     pub fn connection(self: *NetConn) GenericConn {
         return .{
             .ptr = self,
-            .state = self.state,
+            .state = &self.state,
             .closeFn = NetConn.close,
             .writeFn = NetConn.writeFn,
             .readFn = NetConn.readFn,
@@ -40,18 +40,14 @@ const NetConn = struct {
     }
 
     pub fn init(allocator: std.mem.Allocator, stream: std.net.Stream) !*NetConn {
-        const conn_state = try ConnState.init(allocator);
-        errdefer conn_state.deinit(allocator);
-
         var net_conn = try allocator.create(NetConn);
         net_conn.stream = stream;
-        net_conn.state = conn_state;
+        net_conn.state = ConnState{};
 
         return net_conn;
     }
 
     pub fn deinit(self: *NetConn, allocator: std.mem.Allocator) void {
-        self.state.deinit(allocator);
         allocator.destroy(self);
     }
 };
