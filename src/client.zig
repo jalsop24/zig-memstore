@@ -1,25 +1,7 @@
 const std = @import("std");
 
 const protocol = @import("protocol.zig");
-
-fn getAddressFromArgs(args: *std.process.ArgIterator) !std.net.Address {
-    const raw_sock_addr = args.next() orelse {
-        std.log.info("Expected address / port as a command line argument\n", .{});
-        return error.NoAddress;
-    };
-
-    var i: usize = 0;
-    for (raw_sock_addr, 0..) |char, j| {
-        if (char == ':') {
-            i = j;
-            break;
-        }
-    }
-
-    const raw_port = raw_sock_addr[i + 1 ..];
-    const port = try std.fmt.parseInt(u16, raw_port, 10);
-    return std.net.Address.parseIp4(raw_sock_addr[0..i], port);
-}
+const cli = @import("cli.zig");
 
 pub fn main() !void {
     var gpa_alloc = std.heap.GeneralPurposeAllocator(.{}){};
@@ -31,7 +13,7 @@ pub fn main() !void {
 
     // Skip first argument (path to program)
     _ = args.skip();
-    const addr = try getAddressFromArgs(&args);
+    const addr = try cli.getAddressFromArgs(&args);
 
     std.log.info("Connecting to {}", .{addr});
     const stream = std.net.tcpConnectToAddress(addr) catch |err| {
@@ -63,7 +45,7 @@ pub fn main() !void {
         var message = try cli_reader.readUntilDelimiterOrEof(&input_buf, DELIMITER) orelse return;
         var wlen: u32 = 0;
 
-        switch (protocol.parseCommand(message[0..3])) {
+        switch (protocol.parseCommand(message)) {
             .Get => {
                 wlen = try protocol.createGetReq(message[3..], &wbuf);
             },
