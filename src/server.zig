@@ -10,6 +10,12 @@ const ConnState = connection.ConnState;
 const GenericConn = connection.GenericConn;
 const MessageBuffer = protocol.MessageBuffer;
 
+const EPOLL = std.os.linux.EPOLL;
+const POLL = std.posix.POLL;
+
+const TIMEOUT_MS = 1000;
+const MAX_EVENTS = 10;
+
 const NetConn = struct {
     stream: std.net.Stream,
     state: ConnState,
@@ -326,7 +332,7 @@ fn connectionIo(conn: GenericConn, main_mapping: *MainMapping) !void {
     }
 }
 
-fn acceptNewConnection(fd2conn: *std.AutoArrayHashMap(std.posix.socket_t, *NetConn), server: *std.net.Server) !void {
+fn acceptNewConnection(fd2conn: *std.AutoArrayHashMap(std.posix.socket_t, *NetConn), server: *std.net.Server) !std.posix.socket_t {
     const client = try server.accept();
     errdefer client.stream.close();
     std.log.info("Connection received! {}", .{client.address});
@@ -341,6 +347,7 @@ fn acceptNewConnection(fd2conn: *std.AutoArrayHashMap(std.posix.socket_t, *NetCo
     }
 
     try fd2conn.put(conn.stream.handle, conn);
+    return conn.stream.handle;
 }
 
 pub fn main() !void {
@@ -362,8 +369,7 @@ pub fn main() !void {
     defer server.deinit();
     std.log.info("Server listening on port {}", .{address.getPort()});
 
-    var poll_args = std.ArrayList(std.posix.pollfd).init(allocator);
-    defer poll_args.deinit();
+    const epoll_fd = try std.posix.epoll_create1(0);
 
     var fd2conn = std.AutoArrayHashMap(std.posix.socket_t, *NetConn).init(allocator);
     defer {
@@ -386,62 +392,66 @@ pub fn main() !void {
         main_mapping.deinit();
     }
 
-    while (true) {
-        poll_args.clearAndFree();
-
-        // Create poll args for listening server fd
-        const server_pfd: std.posix.pollfd = .{
+    // Add server event to poll state
+    var listen_event = std.os.linux.epoll_event{
+        .events = POLL.IN,
+        .data = .{
             .fd = server.stream.handle,
-            .events = std.posix.POLL.IN,
-            .revents = 0,
-        };
-        try poll_args.append(server_pfd);
-
-        // Create poll args for all client connections
-        for (fd2conn.values()) |conn| {
-            var events: i16 = undefined;
-            if (conn.state.state == .REQ) {
-                events = std.posix.POLL.IN; //| std.posix.POLL.ERR;
-            } else {
-                events = std.posix.POLL.OUT; //| std.posix.POLL.ERR;
-            }
-
-            const client_pfd = std.posix.pollfd{
-                .fd = conn.stream.handle,
-                .events = events,
-                .revents = 0,
-            };
-            try poll_args.append(client_pfd);
-        }
+        },
+    };
+    try std.posix.epoll_ctl(
+        epoll_fd,
+        EPOLL.CTL_ADD,
+        server.stream.handle,
+        &listen_event,
+    );
+    std.debug.print("Server fd {}\n", .{server.stream.handle});
+    while (true) {
 
         // poll for active fds
-        const rv = try std.posix.poll(poll_args.items, 1000);
-        if (rv < 0) {
-            std.log.debug("Poll rv {}", .{rv});
-            return error.PollError;
+        var events: [MAX_EVENTS]std.os.linux.epoll_event = undefined;
+        const ready_events = std.posix.epoll_wait(
+            epoll_fd,
+            &events,
+            TIMEOUT_MS,
+        );
+        if (ready_events <= 0) {
+            continue;
         }
 
-        // Skip the first arg as that corresponds to the server and needs handling
-        // separately
-        // Process active client connections
-        for (poll_args.items[1..]) |pfd| {
-            if (pfd.revents == 0) continue;
+        for (events[0..ready_events]) |event| {
+            std.debug.print("Handling event {}\n", .{event});
+            std.debug.print("fd - {}\n", .{event.data.fd});
 
-            const conn = fd2conn.get(pfd.fd).?;
+            if (event.data.fd == server.stream.handle) {
+                // Handle server fd
+                std.debug.print("accept new connection\n", .{});
+                const client_fd = try acceptNewConnection(&fd2conn, &server);
+                var epoll_event = std.os.linux.epoll_event{
+                    .events = POLL.IN,
+                    .data = .{
+                        .fd = client_fd,
+                    },
+                };
+                try std.posix.epoll_ctl(
+                    epoll_fd,
+                    EPOLL.CTL_ADD,
+                    client_fd,
+                    &epoll_event,
+                );
+                continue;
+            }
+
+            // Process active client connections
+            const conn = fd2conn.get(event.data.fd).?;
             try connectionIo(conn.connection(), &main_mapping);
 
             if (conn.state.state == .END) {
                 std.log.info("Remove connection", .{});
                 conn.connection().close();
-                _ = fd2conn.swapRemove(pfd.fd);
+                _ = fd2conn.swapRemove(event.data.fd);
                 conn.deinit(allocator);
             }
-        }
-
-        // Handle server fd
-        if (poll_args.items[0].revents != 0) {
-            std.log.info("server fd revents {}", .{poll_args.items[0].revents});
-            _ = try acceptNewConnection(&fd2conn, &server);
         }
     }
 }
