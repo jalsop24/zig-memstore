@@ -365,6 +365,7 @@ pub fn main() !void {
     const address = std.net.Address.initIp4(.{ 0, 0, 0, 0 }, port);
     var server = try address.listen(.{
         .force_nonblocking = true,
+        .reuse_port = true,
     });
     defer server.deinit();
     std.log.info("Server listening on port {}", .{address.getPort()});
