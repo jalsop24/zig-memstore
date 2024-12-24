@@ -4,17 +4,12 @@ const protocol = @import("protocol.zig");
 const cli = @import("cli.zig");
 const String = @import("types.zig").String;
 const connection = @import("connection.zig");
+const event_loop = @import("event_loop.zig");
 const testing = @import("testing.zig");
 
 const ConnState = connection.ConnState;
 const GenericConn = connection.GenericConn;
 const MessageBuffer = protocol.MessageBuffer;
-
-const EPOLL = std.os.linux.EPOLL;
-const POLL = std.posix.POLL;
-
-const TIMEOUT_MS = 1000;
-const MAX_EVENTS = 10;
 
 const NetConn = struct {
     stream: std.net.Stream,
@@ -259,6 +254,7 @@ fn tryOneRequest(conn: GenericConn, main_mapping: *MainMapping) bool {
 
 fn tryFillBuffer(conn: GenericConn, main_mapping: *MainMapping) bool {
     // Reset buffer so that it is filled right from the start
+    std.debug.print("Try fill buffer\n", .{});
 
     var conn_state = conn.state;
     std.mem.copyForwards(
@@ -268,6 +264,7 @@ fn tryFillBuffer(conn: GenericConn, main_mapping: *MainMapping) bool {
     );
     conn_state.rbuf_cursor = 0;
 
+    std.debug.print("Read connection\n", .{});
     const num_read = conn.read(conn_state.rbuf[conn_state.rbuf_size..]) catch |err|
         switch (err) {
         // WouldBlock corresponds to EAGAIN signal
@@ -302,6 +299,7 @@ fn stateReq(conn: GenericConn, main_mapping: *MainMapping) void {
 }
 
 fn tryFlushBuffer(conn: GenericConn) bool {
+    std.debug.print("Try flush buffer\n", .{});
     var conn_state = conn.state;
 
     _ = conn.write(conn_state.wbuf[0..conn_state.wbuf_size]) catch |err|
@@ -333,7 +331,19 @@ fn connectionIo(conn: GenericConn, main_mapping: *MainMapping) !void {
 }
 
 fn acceptNewConnection(fd2conn: *std.AutoArrayHashMap(std.posix.socket_t, *NetConn), server: *std.net.Server) !std.posix.socket_t {
-    const client = try server.accept();
+    // Built in server.accept method doesn't allow for non-blocking connections
+    var accepted_addr: std.net.Address = undefined;
+    var addr_len: std.posix.socklen_t = @sizeOf(std.net.Address);
+    const fd = try std.posix.accept(
+        server.stream.handle,
+        &accepted_addr.any,
+        &addr_len,
+        std.posix.SOCK.NONBLOCK,
+    );
+    const client = std.net.Server.Connection{
+        .stream = .{ .handle = fd },
+        .address = accepted_addr,
+    };
     errdefer client.stream.close();
     std.log.info("Connection received! {}", .{client.address});
 
@@ -348,6 +358,13 @@ fn acceptNewConnection(fd2conn: *std.AutoArrayHashMap(std.posix.socket_t, *NetCo
 
     try fd2conn.put(conn.stream.handle, conn);
     return conn.stream.handle;
+}
+
+// Function to manage CTRL + C
+fn sigintHandler(sig: c_int) callconv(.C) void {
+    _ = sig;
+    std.debug.print("\nSIGINT received\n", .{});
+    std.debug.panic("sigint panic", .{});
 }
 
 pub fn main() !void {
@@ -368,9 +385,17 @@ pub fn main() !void {
         .reuse_port = true,
     });
     defer server.deinit();
+
     std.log.info("Server listening on port {}", .{address.getPort()});
 
-    const epoll_fd = try std.posix.epoll_create1(0);
+    const act = std.os.linux.Sigaction{
+        .handler = .{ .handler = sigintHandler },
+        .mask = std.os.linux.empty_sigset,
+        .flags = 0,
+    };
+    if (std.os.linux.sigaction(std.os.linux.SIG.INT, &act, null) != 0) {
+        return error.SignalHandlerError;
+    }
 
     var fd2conn = std.AutoArrayHashMap(std.posix.socket_t, *NetConn).init(allocator);
     defer {
@@ -393,34 +418,18 @@ pub fn main() !void {
         main_mapping.deinit();
     }
 
-    // Add server event to poll state
-    var listen_event = std.os.linux.epoll_event{
-        .events = POLL.IN,
-        .data = .{
-            .fd = server.stream.handle,
-        },
-    };
-    try std.posix.epoll_ctl(
-        epoll_fd,
-        EPOLL.CTL_ADD,
-        server.stream.handle,
-        &listen_event,
-    );
+    var epoll_loop = try event_loop.create_epoll_loop(&server);
     std.debug.print("Server fd {}\n", .{server.stream.handle});
     while (true) {
 
         // poll for active fds
-        var events: [MAX_EVENTS]std.os.linux.epoll_event = undefined;
-        const ready_events = std.posix.epoll_wait(
-            epoll_fd,
-            &events,
-            TIMEOUT_MS,
-        );
+        std.debug.print("wait for events\n", .{});
+        const ready_events = try epoll_loop.wait_for_events();
         if (ready_events <= 0) {
             continue;
         }
 
-        for (events[0..ready_events]) |event| {
+        for (epoll_loop.events[0..ready_events]) |event| {
             std.debug.print("Handling event {}\n", .{event});
             std.debug.print("fd - {}\n", .{event.data.fd});
 
@@ -428,18 +437,7 @@ pub fn main() !void {
                 // Handle server fd
                 std.debug.print("accept new connection\n", .{});
                 const client_fd = try acceptNewConnection(&fd2conn, &server);
-                var epoll_event = std.os.linux.epoll_event{
-                    .events = POLL.IN,
-                    .data = .{
-                        .fd = client_fd,
-                    },
-                };
-                try std.posix.epoll_ctl(
-                    epoll_fd,
-                    EPOLL.CTL_ADD,
-                    client_fd,
-                    &epoll_event,
-                );
+                try epoll_loop.register_client_event(client_fd);
                 continue;
             }
 
