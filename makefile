@@ -19,5 +19,5 @@ client:
 server:
 	${RUN} server
 
-build-image:
+build:
 	docker build . -t zig-memstore:latest
