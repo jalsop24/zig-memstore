@@ -176,6 +176,35 @@ fn handleDeleteCommand(conn_state: *ConnState, buf: []const u8, main_mapping: *M
     conn_state.wbuf_size += written;
 }
 
+fn handleListCommand(conn_state: *ConnState, buf: []const u8, main_mapping: *MainMapping) HandleRequestError!void {
+    std.log.info("List command '{0s}' (0x)", .{buf});
+
+    const keys = main_mapping.keys();
+
+    std.debug.print("total keys {d}\n", .{keys.len});
+
+    if (keys.len == 0) {
+        conn_state.wbuf_size += try protocol.createPayload("no keys", conn_state.wbuf[conn_state.wbuf_size..]);
+        return;
+    }
+
+    var response_buf: [1_000]u8 = undefined;
+    var cursor: usize = 0;
+
+    for (main_mapping.keys()) |key| {
+        std.debug.print("key: {s}\n", .{key});
+        const value = main_mapping.get(key).?;
+        const slice = std.fmt.bufPrint(response_buf[cursor..], "{s} = {s},", .{ key, value.content }) catch |err|
+            switch (err) {
+            error.NoSpaceLeft => return HandleRequestError.MessageTooLong,
+        };
+        cursor += slice.len;
+    }
+
+    const written = try protocol.createPayload(response_buf[0..cursor], conn_state.wbuf[conn_state.wbuf_size..]);
+    conn_state.wbuf_size += written;
+}
+
 fn parseRequest(conn_state: *ConnState, buf: []u8, main_mapping: *MainMapping) void {
 
     // Support get, set, del
@@ -192,6 +221,9 @@ fn parseRequest(conn_state: *ConnState, buf: []u8, main_mapping: *MainMapping) v
             err = e;
         },
         .Delete => handleDeleteCommand(conn_state, buf, main_mapping) catch |e| {
+            err = e;
+        },
+        .List => handleListCommand(conn_state, buf, main_mapping) catch |e| {
             err = e;
         },
         .Unknown => handleUnknownCommand(conn_state, buf),
@@ -386,7 +418,7 @@ pub fn main() !void {
     });
     defer server.deinit();
 
-    std.log.info("Server listening on port {}", .{address.getPort()});
+    std.log.info("Server v0.1 listening on port {}", .{address.getPort()});
 
     const act = std.os.linux.Sigaction{
         .handler = .{ .handler = sigintHandler },
@@ -423,7 +455,6 @@ pub fn main() !void {
     while (true) {
 
         // poll for active fds
-        std.debug.print("wait for events\n", .{});
         const ready_events = try epoll_loop.wait_for_events();
         if (ready_events <= 0) {
             continue;
