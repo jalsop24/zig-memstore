@@ -181,17 +181,28 @@ fn handleListCommand(conn_state: *ConnState, buf: []const u8, main_mapping: *Mai
 
     const keys = main_mapping.keys();
 
-    std.debug.print("total keys {d}", .{keys.len});
+    std.debug.print("total keys {d}\n", .{keys.len});
 
     if (keys.len == 0) {
         conn_state.wbuf_size += try protocol.createPayload("no keys", conn_state.wbuf[conn_state.wbuf_size..]);
         return;
     }
 
+    var response_buf: [1_000]u8 = undefined;
+    var cursor: usize = 0;
+
     for (main_mapping.keys()) |key| {
-        const written = try protocol.createPayload(key, conn_state.wbuf[conn_state.wbuf_size..]);
-        conn_state.wbuf_size += written;
+        std.debug.print("key: {s}\n", .{key});
+        const value = main_mapping.get(key).?;
+        const slice = std.fmt.bufPrint(response_buf[cursor..], "{s} = {s},", .{ key, value.content }) catch |err|
+            switch (err) {
+            error.NoSpaceLeft => return HandleRequestError.MessageTooLong,
+        };
+        cursor += slice.len;
     }
+
+    const written = try protocol.createPayload(response_buf[0..cursor], conn_state.wbuf[conn_state.wbuf_size..]);
+    conn_state.wbuf_size += written;
 }
 
 fn parseRequest(conn_state: *ConnState, buf: []u8, main_mapping: *MainMapping) void {
