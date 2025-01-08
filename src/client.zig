@@ -55,6 +55,9 @@ pub fn main() !void {
             .Delete => {
                 wlen = try protocol.createDelReq(message[3..], &wbuf);
             },
+            .List => {
+                wlen = try protocol.createListReq(message[3..], &wbuf);
+            },
             .Unknown => {
                 if (std.mem.eql(u8, message, "exit")) {
                     break;

@@ -14,7 +14,10 @@ pub const Command = enum {
     Get,
     Set,
     Delete,
+    List,
     Unknown,
+
+    pub const LIST_LITERAL = "lst";
 };
 
 pub fn createPayload(message: []const u8, buf: []u8) PayloadCreationError!MessageLen {
@@ -66,6 +69,7 @@ pub fn parseCommand(buf: []const u8) Command {
     if (commandIs(buf[0..3], "get")) return Command.Get;
     if (commandIs(buf[0..3], "set")) return Command.Set;
     if (commandIs(buf[0..3], "del")) return Command.Delete;
+    if (commandIs(buf[0..3], Command.LIST_LITERAL)) return Command.List;
 
     return Command.Unknown;
 }
@@ -206,6 +210,25 @@ pub fn createDelReq(message: []const u8, wbuf: []u8) !MessageLen {
     // 2 bytes for key length
     // key_len bytes for key content
     const m_len: MessageLen = 3 + 2 + key_len;
+
+    // Write len_header_size byte total message length header
+    std.mem.writePackedInt(
+        MessageLen,
+        wbuf[0..len_header_size],
+        0,
+        m_len,
+        native_endian,
+    );
+    return len_header_size + m_len;
+}
+
+pub fn createListReq(message: []const u8, wbuf: []u8) !MessageLen {
+    _ = message;
+    const out_buf = wbuf[len_header_size..];
+    @memcpy(out_buf[0..3], Command.LIST_LITERAL);
+
+    // Message is just the command name itself (no arguments)
+    const m_len = 3;
 
     // Write len_header_size byte total message length header
     std.mem.writePackedInt(
