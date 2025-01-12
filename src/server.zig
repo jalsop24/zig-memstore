@@ -319,12 +319,12 @@ fn connectionIo(conn: GenericConn, main_mapping: *MainMapping) !void {
     }
 }
 
-fn acceptNewConnection(fd2conn: *ConnMapping, server: *std.net.Server) !std.posix.socket_t {
+fn acceptNewConnection(fd2conn: *ConnMapping, server_handle: std.posix.socket_t) !std.posix.socket_t {
     // Built in server.accept method doesn't allow for non-blocking connections
     var accepted_addr: std.net.Address = undefined;
     var addr_len: std.posix.socklen_t = @sizeOf(std.net.Address);
     const fd = try std.posix.accept(
-        server.stream.handle,
+        server_handle,
         &accepted_addr.any,
         &addr_len,
         std.posix.SOCK.NONBLOCK,
@@ -354,6 +354,36 @@ fn sigintHandler(sig: c_int) callconv(.C) void {
     _ = sig;
     std.debug.print("\nSIGINT received\n", .{});
     std.debug.panic("sigint panic", .{});
+}
+
+fn handleEvent(
+    event: *const event_loop.Event,
+    epoll_loop: *event_loop.EpollEventLoop,
+    server_handle: std.posix.socket_t,
+    conn_mapping: *ConnMapping,
+    main_mapping: *MainMapping,
+) !void {
+    std.debug.print("Handling event {}\n", .{event});
+    std.debug.print("fd - {}\n", .{event.data.fd});
+
+    if (event.data.fd == server_handle) {
+        // Handle server fd
+        std.debug.print("accept new connection\n", .{});
+        const client_fd = try acceptNewConnection(conn_mapping, server_handle);
+        try epoll_loop.register_client_event(client_fd);
+        return;
+    }
+
+    // Process active client connections
+    const conn = conn_mapping.get(event.data.fd).?;
+    try connectionIo(conn.connection(), main_mapping);
+
+    if (conn.state.state == .END) {
+        std.log.info("Remove connection (fd={})\n", .{conn.stream.handle});
+        conn.connection().close();
+        _ = conn_mapping.swapRemove(event.data.fd);
+        conn.deinit(conn_mapping.allocator);
+    }
 }
 
 pub fn main() !void {
@@ -413,32 +443,18 @@ pub fn main() !void {
 
         // poll for active fds
         const ready_events = try epoll_loop.wait_for_events();
-        if (ready_events <= 0) {
+        if (ready_events.len <= 0) {
             continue;
         }
 
-        for (epoll_loop.events[0..ready_events]) |event| {
-            std.debug.print("Handling event {}\n", .{event});
-            std.debug.print("fd - {}\n", .{event.data.fd});
-
-            if (event.data.fd == server.stream.handle) {
-                // Handle server fd
-                std.debug.print("accept new connection\n", .{});
-                const client_fd = try acceptNewConnection(&fd2conn, &server);
-                try epoll_loop.register_client_event(client_fd);
-                continue;
-            }
-
-            // Process active client connections
-            const conn = fd2conn.get(event.data.fd).?;
-            try connectionIo(conn.connection(), &main_mapping);
-
-            if (conn.state.state == .END) {
-                std.log.info("Remove connection (fd={})\n", .{conn.stream.handle});
-                conn.connection().close();
-                _ = fd2conn.swapRemove(event.data.fd);
-                conn.deinit(allocator);
-            }
+        for (ready_events) |event| {
+            try handleEvent(
+                &event,
+                &epoll_loop,
+                server.stream.handle,
+                &fd2conn,
+                &main_mapping,
+            );
         }
     }
 }
