@@ -374,16 +374,16 @@ fn acceptNewConnection(fd2conn: *ConnMapping, server: *std.net.Server) !std.posi
         &addr_len,
         std.posix.SOCK.NONBLOCK,
     );
-    const client = std.net.Server.Connection{
-        .stream = .{ .handle = fd },
-        .address = accepted_addr,
+    const stream = std.net.Stream{
+        .handle = fd,
     };
-    errdefer client.stream.close();
-    std.log.info("Connection received! {}", .{client.address});
+
+    errdefer stream.close();
+    std.log.info("Connection received! {}", .{accepted_addr});
 
     const conn = try NetConn.init(
         fd2conn.allocator,
-        client.stream,
+        stream,
     );
     errdefer {
         conn.deinit(fd2conn.allocator);
