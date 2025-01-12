@@ -55,6 +55,8 @@ const NetConn = struct {
 
 const MainMapping = std.StringArrayHashMap(*String);
 
+const ConnMapping = std.AutoArrayHashMap(std.posix.socket_t, *NetConn);
+
 const HandleRequestError = error{InvalidRequest} || protocol.PayloadCreationError;
 
 fn handleUnknownCommand(conn_state: *ConnState, bytes: []const u8) void {
@@ -362,7 +364,7 @@ fn connectionIo(conn: GenericConn, main_mapping: *MainMapping) !void {
     }
 }
 
-fn acceptNewConnection(fd2conn: *std.AutoArrayHashMap(std.posix.socket_t, *NetConn), server: *std.net.Server) !std.posix.socket_t {
+fn acceptNewConnection(fd2conn: *ConnMapping, server: *std.net.Server) !std.posix.socket_t {
     // Built in server.accept method doesn't allow for non-blocking connections
     var accepted_addr: std.net.Address = undefined;
     var addr_len: std.posix.socklen_t = @sizeOf(std.net.Address);
@@ -429,7 +431,7 @@ pub fn main() !void {
         return error.SignalHandlerError;
     }
 
-    var fd2conn = std.AutoArrayHashMap(std.posix.socket_t, *NetConn).init(allocator);
+    var fd2conn = ConnMapping.init(allocator);
     defer {
         // Make sure to clean up any lasting connections before
         // deiniting the hashmap
