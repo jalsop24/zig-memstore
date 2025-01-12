@@ -319,7 +319,7 @@ fn connectionIo(conn: GenericConn, main_mapping: *MainMapping) !void {
     }
 }
 
-fn acceptNewConnection(fd2conn: *ConnMapping, server: *std.net.Server) !std.posix.socket_t {
+fn acceptNewConnection(fd2conn: *ConnMapping, server_handle: std.posix.socket_t) !std.posix.socket_t {
     // Built in server.accept method doesn't allow for non-blocking connections
     var accepted_addr: std.net.Address = undefined;
     var addr_len: std.posix.socklen_t = @sizeOf(std.net.Address);
@@ -386,10 +386,6 @@ fn handleEvent(
     }
 }
 
-pub const std_options = .{
-    .log_level = .info,
-};
-
 pub fn main() !void {
     var gpa_alloc = std.heap.GeneralPurposeAllocator(.{}){};
     defer std.debug.assert(gpa_alloc.deinit() == .ok);
@@ -452,28 +448,14 @@ pub fn main() !void {
             continue;
         }
 
-        for (epoll_loop.events[0..ready_events]) |event| {
-            std.debug.print("Handling event {}\n", .{event});
-            std.debug.print("fd - {}\n", .{event.data.fd});
-
-            if (event.data.fd == server.stream.handle) {
-                // Handle server fd
-                std.debug.print("accept new connection\n", .{});
-                const client_fd = try acceptNewConnection(&fd2conn, &server);
-                try epoll_loop.register_client_event(client_fd);
-                continue;
-            }
-
-            // Process active client connections
-            const conn = fd2conn.get(event.data.fd).?;
-            try connectionIo(conn.connection(), &main_mapping);
-
-            if (conn.state.state == .END) {
-                std.log.info("Remove connection (fd={})\n", .{conn.stream.handle});
-                conn.connection().close();
-                _ = fd2conn.swapRemove(event.data.fd);
-                conn.deinit(allocator);
-            }
+        for (ready_events) |event| {
+            try handleEvent(
+                &event,
+                &epoll_loop,
+                server.stream.handle,
+                &fd2conn,
+                &main_mapping,
+            );
         }
     }
 }
