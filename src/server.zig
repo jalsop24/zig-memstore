@@ -62,8 +62,7 @@ fn handleGetCommand(conn_state: *ConnState, buf: []u8, main_mapping: *MainMappin
         error.NoSpaceLeft => unreachable,
     };
 
-    const written = try protocol.createPayload(response, conn_state.wbuf[conn_state.wbuf_size..]);
-    conn_state.wbuf_size += written;
+    conn_state.wbuf_size += try protocol.createPayload(response, conn_state.w_slice());
 }
 
 fn handleSetCommand(conn_state: *ConnState, buf: []u8, main_mapping: *MainMapping) HandleRequestError!void {
@@ -104,8 +103,7 @@ fn handleSetCommand(conn_state: *ConnState, buf: []u8, main_mapping: *MainMappin
     };
 
     const response = "created";
-    const written = protocol.createPayload(response, conn_state.wbuf[conn_state.wbuf_size..]) catch unreachable;
-    conn_state.wbuf_size += written;
+    conn_state.wbuf_size += protocol.createPayload(response, conn_state.w_slice()) catch unreachable;
 }
 
 fn handleDeleteCommand(conn_state: *ConnState, buf: []const u8, main_mapping: *MainMapping) HandleRequestError!void {
@@ -134,8 +132,7 @@ fn handleDeleteCommand(conn_state: *ConnState, buf: []const u8, main_mapping: *M
         error.NoSpaceLeft => unreachable,
     };
 
-    const written = try protocol.createPayload(response, conn_state.wbuf[conn_state.wbuf_size..]);
-    conn_state.wbuf_size += written;
+    conn_state.wbuf_size += try protocol.createPayload(response, conn_state.w_slice());
 }
 
 fn handleListCommand(conn_state: *ConnState, buf: []const u8, main_mapping: *MainMapping) HandleRequestError!void {
@@ -146,7 +143,7 @@ fn handleListCommand(conn_state: *ConnState, buf: []const u8, main_mapping: *Mai
     std.debug.print("total keys {d}\n", .{keys.len});
 
     if (keys.len == 0) {
-        conn_state.wbuf_size += try protocol.createPayload("no keys", conn_state.wbuf[conn_state.wbuf_size..]);
+        conn_state.wbuf_size += try protocol.createPayload("no keys", conn_state.w_slice());
         return;
     }
 
@@ -163,8 +160,7 @@ fn handleListCommand(conn_state: *ConnState, buf: []const u8, main_mapping: *Mai
         cursor += slice.len;
     }
 
-    const written = try protocol.createPayload(response_buf[0..cursor], conn_state.wbuf[conn_state.wbuf_size..]);
-    conn_state.wbuf_size += written;
+    conn_state.wbuf_size += try protocol.createPayload(response_buf[0..cursor], conn_state.w_slice());
 }
 
 fn parseRequest(conn_state: *ConnState, buf: []u8, main_mapping: *MainMapping) void {
@@ -196,8 +192,7 @@ fn parseRequest(conn_state: *ConnState, buf: []u8, main_mapping: *MainMapping) v
             // Length check has already been completed
             error.MessageTooLong => unreachable,
             error.InvalidRequest => {
-                const written = protocol.createPayload("Invalid request", conn_state.wbuf[conn_state.wbuf_size..]) catch unreachable;
-                conn_state.wbuf_size += written;
+                conn_state.wbuf_size += protocol.createPayload("Invalid request", conn_state.w_slice()) catch unreachable;
             },
         }
     }
