@@ -57,9 +57,9 @@ pub const EpollEventLoop = struct {
     }
 };
 
-pub fn create_epoll_loop(server: *std.net.Server) !EpollEventLoop {
+pub fn create_epoll_loop(server_handle: std.posix.socket_t) !EpollEventLoop {
     var new_loop = EpollEventLoop{};
     try new_loop.init();
-    try new_loop.register_server_event(server.stream.handle);
+    try new_loop.register_server_event(server_handle);
     return new_loop;
 }

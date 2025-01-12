@@ -404,6 +404,7 @@ pub fn main() !void {
         .reuse_port = true,
     });
     defer server.deinit();
+    const server_handle = server.stream.handle;
 
     std.log.info("Server v0.1 listening on port {}", .{address.getPort()});
 
@@ -437,8 +438,8 @@ pub fn main() !void {
         main_mapping.deinit();
     }
 
-    var epoll_loop = try event_loop.create_epoll_loop(&server);
-    std.debug.print("Server fd {}\n", .{server.stream.handle});
+    var epoll_loop = try event_loop.create_epoll_loop(server_handle);
+    std.debug.print("Server fd {}\n", .{server_handle});
     while (true) {
 
         // poll for active fds
@@ -451,7 +452,7 @@ pub fn main() !void {
             try handleEvent(
                 &event,
                 &epoll_loop,
-                server.stream.handle,
+                server_handle,
                 &fd2conn,
                 &main_mapping,
             );
