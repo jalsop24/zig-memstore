@@ -1,8 +1,9 @@
 
-RUN := docker compose run --rm --remove-orphans
+RUN := docker compose run --rm --remove-orphans --build
+TEST := zig test ./src/server.zig 
 
 test:
-	zig test src/server.zig
+	${RUN} --entrypoint="${TEST}" shell
 
 run:
 	docker compose up -d --build
