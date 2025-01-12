@@ -334,7 +334,7 @@ fn acceptNewConnection(fd2conn: *ConnMapping, server: *std.net.Server) !std.posi
     };
 
     errdefer stream.close();
-    std.log.info("Connection received! {} (fd={})", .{ accepted_addr, fd });
+    std.log.info("Connection received! {}", .{accepted_addr});
 
     const conn = try NetConn.init(
         fd2conn.allocator,
