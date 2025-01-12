@@ -7,51 +7,11 @@ const connection = @import("connection.zig");
 const event_loop = @import("event_loop.zig");
 const testing = @import("testing.zig");
 
+const NetConn = @import("NetConn.zig");
+
 const ConnState = connection.ConnState;
 const GenericConn = connection.GenericConn;
 const MessageBuffer = protocol.MessageBuffer;
-
-const NetConn = struct {
-    stream: std.net.Stream,
-    state: ConnState,
-
-    pub fn close(ptr: *anyopaque) void {
-        var self: *NetConn = @ptrCast(@alignCast(ptr));
-        self.stream.close();
-    }
-
-    pub fn writeFn(ptr: *anyopaque, bytes: []const u8) !usize {
-        var self: *NetConn = @ptrCast(@alignCast(ptr));
-        return self.stream.writer().write(bytes);
-    }
-
-    pub fn readFn(ptr: *anyopaque, buffer: []u8) !usize {
-        var self: *NetConn = @ptrCast(@alignCast(ptr));
-        return self.stream.reader().read(buffer);
-    }
-
-    pub fn connection(self: *NetConn) GenericConn {
-        return .{
-            .ptr = self,
-            .state = &self.state,
-            .closeFn = NetConn.close,
-            .writeFn = NetConn.writeFn,
-            .readFn = NetConn.readFn,
-        };
-    }
-
-    pub fn init(allocator: std.mem.Allocator, stream: std.net.Stream) !*NetConn {
-        var net_conn = try allocator.create(NetConn);
-        net_conn.stream = stream;
-        net_conn.state = ConnState{};
-
-        return net_conn;
-    }
-
-    pub fn deinit(self: *NetConn, allocator: std.mem.Allocator) void {
-        allocator.destroy(self);
-    }
-};
 
 const MainMapping = std.StringArrayHashMap(*String);
 
