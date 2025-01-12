@@ -439,7 +439,7 @@ pub fn main() !void {
     }
 
     var epoll_loop = try event_loop.create_epoll_loop(server_handle);
-    std.log.debug("Server fd {}\n", .{server_handle});
+    std.debug.print("Server fd {}\n", .{server_handle});
     while (true) {
 
         // poll for active fds
@@ -452,7 +452,7 @@ pub fn main() !void {
             try handleEvent(
                 &event,
                 &epoll_loop,
-                server.stream.handle,
+                server_handle,
                 &fd2conn,
                 &main_mapping,
             );
