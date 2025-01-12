@@ -339,7 +339,7 @@ fn acceptNewConnection(fd2conn: *ConnMapping, server: *std.net.Server) !std.posi
     };
 
     errdefer stream.close();
-    std.log.info("Connection received! {}", .{accepted_addr});
+    std.log.info("Connection received! {} (fd={})", .{ accepted_addr, fd });
 
     const conn = try NetConn.init(
         fd2conn.allocator,
@@ -439,7 +439,7 @@ pub fn main() !void {
             try connectionIo(conn.connection(), &main_mapping);
 
             if (conn.state.state == .END) {
-                std.log.info("Remove connection", .{});
+                std.log.info("Remove connection (fd={})\n", .{conn.stream.handle});
                 conn.connection().close();
                 _ = fd2conn.swapRemove(event.data.fd);
                 conn.deinit(allocator);
