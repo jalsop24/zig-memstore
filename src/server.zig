@@ -334,7 +334,7 @@ fn acceptNewConnection(fd2conn: *ConnMapping, server: *std.net.Server) !std.posi
     };
 
     errdefer stream.close();
-    std.log.info("Connection received! {}", .{accepted_addr});
+    std.log.info("Connection received! {} (fd={})", .{ accepted_addr, fd });
 
     const conn = try NetConn.init(
         fd2conn.allocator,
@@ -452,14 +452,28 @@ pub fn main() !void {
             continue;
         }
 
-        for (ready_events) |event| {
-            try handleEvent(
-                &event,
-                &epoll_loop,
-                server_handle,
-                &fd2conn,
-                &main_mapping,
-            );
+        for (epoll_loop.events[0..ready_events]) |event| {
+            std.debug.print("Handling event {}\n", .{event});
+            std.debug.print("fd - {}\n", .{event.data.fd});
+
+            if (event.data.fd == server.stream.handle) {
+                // Handle server fd
+                std.debug.print("accept new connection\n", .{});
+                const client_fd = try acceptNewConnection(&fd2conn, &server);
+                try epoll_loop.register_client_event(client_fd);
+                continue;
+            }
+
+            // Process active client connections
+            const conn = fd2conn.get(event.data.fd).?;
+            try connectionIo(conn.connection(), &main_mapping);
+
+            if (conn.state.state == .END) {
+                std.log.info("Remove connection (fd={})\n", .{conn.stream.handle});
+                conn.connection().close();
+                _ = fd2conn.swapRemove(event.data.fd);
+                conn.deinit(allocator);
+            }
         }
     }
 }
