@@ -319,7 +319,7 @@ fn connectionIo(conn: GenericConn, main_mapping: *MainMapping) !void {
     }
 }
 
-fn acceptNewConnection(fd2conn: *ConnMapping, server_handle: std.posix.socket_t) !std.posix.socket_t {
+fn acceptNewConnection(fd2conn: *ConnMapping, server: *std.net.Server) !std.posix.socket_t {
     // Built in server.accept method doesn't allow for non-blocking connections
     var accepted_addr: std.net.Address = undefined;
     var addr_len: std.posix.socklen_t = @sizeOf(std.net.Address);
