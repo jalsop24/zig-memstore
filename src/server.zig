@@ -46,7 +46,7 @@ fn handleGetCommand(conn_state: *ConnState, buf: []u8, main_mapping: *MainMappin
     };
 
     std.log.info("Get key '{s}'", .{key});
-    const raw_value = (main_mapping.get(key));
+    const raw_value = main_mapping.get(key);
 
     std.log.debug("content", .{});
     const value: []u8 = if (raw_value) |str|

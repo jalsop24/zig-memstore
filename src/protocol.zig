@@ -93,7 +93,7 @@ pub fn parseString(buf: []const u8) error{InvalidString}![]const u8 {
         return error.InvalidString;
     }
 
-    return buf[2 .. 2 + str_len];
+    return buf[2..][0..str_len];
 }
 
 fn readWord(buf: []const u8, out_buf: []u8) !struct { u16, u32 } {
