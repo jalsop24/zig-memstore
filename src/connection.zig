@@ -24,8 +24,12 @@ pub const ConnState = struct {
     wbuf_sent: usize = 0,
     wbuf: MessageBuffer = undefined,
 
-    pub fn w_slice(self: *ConnState) []u8 {
+    pub fn writeable_slice(self: *ConnState) []u8 {
         return self.wbuf[self.wbuf_size..];
+    }
+
+    pub fn written_slice(self: *ConnState) []u8 {
+        return self.wbuf[0..self.wbuf_size];
     }
 };
 
