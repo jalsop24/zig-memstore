@@ -19,6 +19,10 @@ const ConnMapping = std.AutoArrayHashMap(std.posix.socket_t, *NetConn);
 
 const HandleRequestError = error{InvalidRequest} || protocol.PayloadCreationError;
 
+fn writeResponse(conn_state: *ConnState, response: []const u8) protocol.PayloadCreationError!void {
+    conn_state.wbuf_size += try protocol.createPayload(response, conn_state.writeable_slice());
+}
+
 fn handleUnknownCommand(conn_state: *ConnState, bytes: []const u8) void {
     std.log.info("Client says '{s}'", .{bytes});
     // Generate echo response
@@ -62,7 +66,7 @@ fn handleGetCommand(conn_state: *ConnState, buf: []u8, main_mapping: *MainMappin
         error.NoSpaceLeft => unreachable,
     };
 
-    conn_state.wbuf_size += try protocol.createPayload(response, conn_state.writeable_slice());
+    try writeResponse(conn_state, response);
 }
 
 fn handleSetCommand(conn_state: *ConnState, buf: []u8, main_mapping: *MainMapping) HandleRequestError!void {
@@ -103,7 +107,7 @@ fn handleSetCommand(conn_state: *ConnState, buf: []u8, main_mapping: *MainMappin
     };
 
     const response = "created";
-    conn_state.wbuf_size += protocol.createPayload(response, conn_state.writeable_slice()) catch unreachable;
+    writeResponse(conn_state, response) catch unreachable;
 }
 
 fn handleDeleteCommand(conn_state: *ConnState, buf: []const u8, main_mapping: *MainMapping) HandleRequestError!void {
@@ -132,7 +136,7 @@ fn handleDeleteCommand(conn_state: *ConnState, buf: []const u8, main_mapping: *M
         error.NoSpaceLeft => unreachable,
     };
 
-    conn_state.wbuf_size += try protocol.createPayload(response, conn_state.writeable_slice());
+    try writeResponse(conn_state, response);
 }
 
 fn handleListCommand(conn_state: *ConnState, buf: []const u8, main_mapping: *MainMapping) HandleRequestError!void {
@@ -143,7 +147,7 @@ fn handleListCommand(conn_state: *ConnState, buf: []const u8, main_mapping: *Mai
     std.debug.print("total keys {d}\n", .{keys.len});
 
     if (keys.len == 0) {
-        conn_state.wbuf_size += try protocol.createPayload("no keys", conn_state.writeable_slice());
+        try writeResponse(conn_state, "no keys");
         return;
     }
 
@@ -160,7 +164,7 @@ fn handleListCommand(conn_state: *ConnState, buf: []const u8, main_mapping: *Mai
         cursor += slice.len;
     }
 
-    conn_state.wbuf_size += try protocol.createPayload(response_buf[0..cursor], conn_state.writeable_slice());
+    try writeResponse(conn_state, response_buf[0..cursor]);
 }
 
 fn parseRequest(conn_state: *ConnState, buf: []u8, main_mapping: *MainMapping) void {
@@ -192,7 +196,7 @@ fn parseRequest(conn_state: *ConnState, buf: []u8, main_mapping: *MainMapping) v
             // Length check has already been completed
             error.MessageTooLong => unreachable,
             error.InvalidRequest => {
-                conn_state.wbuf_size += protocol.createPayload("Invalid request", conn_state.writeable_slice()) catch unreachable;
+                writeResponse(conn_state, "Invalid request") catch unreachable;
             },
         }
     }
