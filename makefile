@@ -6,7 +6,7 @@ test:
 	${RUN} --entrypoint="${TEST}" shell
 
 run:
-	docker compose up -d --build
+	docker compose up -d --build server
 
 down:
 	docker compose down
