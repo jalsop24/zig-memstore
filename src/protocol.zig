@@ -17,6 +17,9 @@ pub const Command = enum {
     List,
     Unknown,
 
+    pub const GET_LITERAL = "get";
+    pub const SET_LITERAL = "set";
+    pub const DELETE_LITERAL = "del";
     pub const LIST_LITERAL = "lst";
 };
 
@@ -66,9 +69,9 @@ fn commandIs(buf: []const u8, command: []const u8) bool {
 pub fn parseCommand(buf: []const u8) Command {
     if (buf.len < 3) return Command.Unknown;
 
-    if (commandIs(buf[0..3], "get")) return Command.Get;
-    if (commandIs(buf[0..3], "set")) return Command.Set;
-    if (commandIs(buf[0..3], "del")) return Command.Delete;
+    if (commandIs(buf[0..3], Command.GET_LITERAL)) return Command.Get;
+    if (commandIs(buf[0..3], Command.SET_LITERAL)) return Command.Set;
+    if (commandIs(buf[0..3], Command.DELETE_LITERAL)) return Command.Delete;
     if (commandIs(buf[0..3], Command.LIST_LITERAL)) return Command.List;
 
     return Command.Unknown;
@@ -93,7 +96,7 @@ pub fn parseString(buf: []const u8) error{InvalidString}![]const u8 {
         return error.InvalidString;
     }
 
-    return buf[2 .. 2 + str_len];
+    return buf[2..][0..str_len];
 }
 
 fn readWord(buf: []const u8, out_buf: []u8) !struct { u16, u32 } {
@@ -143,11 +146,11 @@ fn parseWord(buf: []const u8, out_buf: []u8) !struct { u16, u32 } {
 pub fn createGetReq(message: []const u8, wbuf: []u8) !MessageLen {
     const out_buf = wbuf[len_header_size..];
 
-    @memcpy(out_buf[0..3], "get");
+    @memcpy(out_buf[0..3], Command.GET_LITERAL);
 
     // Parse the key back into the input buffer
     const key_len, _ = try parseWord(message, out_buf[3..]);
-    std.log.info("Key length {}", .{key_len});
+    std.log.debug("Key length {}", .{key_len});
 
     // 3 Bytes for command
     // 2 bytes for key length
@@ -167,18 +170,18 @@ pub fn createGetReq(message: []const u8, wbuf: []u8) !MessageLen {
 
 pub fn createSetReq(message: []const u8, wbuf: []u8) !MessageLen {
     const out_buf = wbuf[len_header_size..];
-    @memcpy(out_buf[0..3], "set");
+    @memcpy(out_buf[0..3], Command.SET_LITERAL);
 
     const key_len, const bytes_read = try parseWord(message, out_buf[3..]);
-    std.log.info("Key length {}", .{key_len});
-    std.log.info("Bytes read {}", .{bytes_read});
+    std.log.debug("Key length {}", .{key_len});
+    std.log.debug("Bytes read {}", .{bytes_read});
 
     // Parse value into out_buffer at 5 + key_len position:
     // 3 bytes for "set"
     // 2 bytes for key_len
     // key_len bytes for key
     const val_len, _ = try parseWord(message[bytes_read..], out_buf[5 + key_len ..]);
-    std.log.info("Val length {}", .{val_len});
+    std.log.debug("Val length {}", .{val_len});
 
     // 3 Bytes for command
     // 2 bytes for key length
@@ -200,11 +203,11 @@ pub fn createSetReq(message: []const u8, wbuf: []u8) !MessageLen {
 
 pub fn createDelReq(message: []const u8, wbuf: []u8) !MessageLen {
     const out_buf = wbuf[len_header_size..];
-    @memcpy(out_buf[0..3], "del");
+    @memcpy(out_buf[0..3], Command.DELETE_LITERAL);
 
     // Parse the key back into the input buffer
     const key_len, _ = try parseWord(message, out_buf[3..]);
-    std.log.info("Key length {}", .{key_len});
+    std.log.debug("Key length {}", .{key_len});
 
     // 3 Bytes for command
     // 2 bytes for key length

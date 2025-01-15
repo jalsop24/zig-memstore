@@ -23,6 +23,14 @@ pub const ConnState = struct {
     wbuf_size: usize = 0,
     wbuf_sent: usize = 0,
     wbuf: MessageBuffer = undefined,
+
+    pub fn writeable_slice(self: *ConnState) []u8 {
+        return self.wbuf[self.wbuf_size..];
+    }
+
+    pub fn written_slice(self: *ConnState) []u8 {
+        return self.wbuf[0..self.wbuf_size];
+    }
 };
 
 pub const GenericConn = struct {

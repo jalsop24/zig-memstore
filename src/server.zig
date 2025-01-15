@@ -7,53 +7,15 @@ const connection = @import("connection.zig");
 const event_loop = @import("event_loop.zig");
 const testing = @import("testing.zig");
 
+const NetConn = @import("NetConn.zig");
+
 const ConnState = connection.ConnState;
 const GenericConn = connection.GenericConn;
 const MessageBuffer = protocol.MessageBuffer;
 
-const NetConn = struct {
-    stream: std.net.Stream,
-    state: ConnState,
-
-    pub fn close(ptr: *anyopaque) void {
-        var self: *NetConn = @ptrCast(@alignCast(ptr));
-        self.stream.close();
-    }
-
-    pub fn writeFn(ptr: *anyopaque, bytes: []const u8) !usize {
-        var self: *NetConn = @ptrCast(@alignCast(ptr));
-        return self.stream.writer().write(bytes);
-    }
-
-    pub fn readFn(ptr: *anyopaque, buffer: []u8) !usize {
-        var self: *NetConn = @ptrCast(@alignCast(ptr));
-        return self.stream.reader().read(buffer);
-    }
-
-    pub fn connection(self: *NetConn) GenericConn {
-        return .{
-            .ptr = self,
-            .state = &self.state,
-            .closeFn = NetConn.close,
-            .writeFn = NetConn.writeFn,
-            .readFn = NetConn.readFn,
-        };
-    }
-
-    pub fn init(allocator: std.mem.Allocator, stream: std.net.Stream) !*NetConn {
-        var net_conn = try allocator.create(NetConn);
-        net_conn.stream = stream;
-        net_conn.state = ConnState{};
-
-        return net_conn;
-    }
-
-    pub fn deinit(self: *NetConn, allocator: std.mem.Allocator) void {
-        allocator.destroy(self);
-    }
-};
-
 const MainMapping = std.StringArrayHashMap(*String);
+
+const ConnMapping = std.AutoArrayHashMap(std.posix.socket_t, *NetConn);
 
 const HandleRequestError = error{InvalidRequest} || protocol.PayloadCreationError;
 
@@ -84,7 +46,7 @@ fn handleGetCommand(conn_state: *ConnState, buf: []u8, main_mapping: *MainMappin
     };
 
     std.log.info("Get key '{s}'", .{key});
-    const raw_value = (main_mapping.get(key));
+    const raw_value = main_mapping.get(key);
 
     std.log.debug("content", .{});
     const value: []u8 = if (raw_value) |str|
@@ -100,8 +62,7 @@ fn handleGetCommand(conn_state: *ConnState, buf: []u8, main_mapping: *MainMappin
         error.NoSpaceLeft => unreachable,
     };
 
-    const written = try protocol.createPayload(response, conn_state.wbuf[conn_state.wbuf_size..]);
-    conn_state.wbuf_size += written;
+    conn_state.wbuf_size += try protocol.createPayload(response, conn_state.writeable_slice());
 }
 
 fn handleSetCommand(conn_state: *ConnState, buf: []u8, main_mapping: *MainMapping) HandleRequestError!void {
@@ -142,8 +103,7 @@ fn handleSetCommand(conn_state: *ConnState, buf: []u8, main_mapping: *MainMappin
     };
 
     const response = "created";
-    const written = protocol.createPayload(response, conn_state.wbuf[conn_state.wbuf_size..]) catch unreachable;
-    conn_state.wbuf_size += written;
+    conn_state.wbuf_size += protocol.createPayload(response, conn_state.writeable_slice()) catch unreachable;
 }
 
 fn handleDeleteCommand(conn_state: *ConnState, buf: []const u8, main_mapping: *MainMapping) HandleRequestError!void {
@@ -172,8 +132,7 @@ fn handleDeleteCommand(conn_state: *ConnState, buf: []const u8, main_mapping: *M
         error.NoSpaceLeft => unreachable,
     };
 
-    const written = try protocol.createPayload(response, conn_state.wbuf[conn_state.wbuf_size..]);
-    conn_state.wbuf_size += written;
+    conn_state.wbuf_size += try protocol.createPayload(response, conn_state.writeable_slice());
 }
 
 fn handleListCommand(conn_state: *ConnState, buf: []const u8, main_mapping: *MainMapping) HandleRequestError!void {
@@ -184,7 +143,7 @@ fn handleListCommand(conn_state: *ConnState, buf: []const u8, main_mapping: *Mai
     std.debug.print("total keys {d}\n", .{keys.len});
 
     if (keys.len == 0) {
-        conn_state.wbuf_size += try protocol.createPayload("no keys", conn_state.wbuf[conn_state.wbuf_size..]);
+        conn_state.wbuf_size += try protocol.createPayload("no keys", conn_state.writeable_slice());
         return;
     }
 
@@ -201,8 +160,7 @@ fn handleListCommand(conn_state: *ConnState, buf: []const u8, main_mapping: *Mai
         cursor += slice.len;
     }
 
-    const written = try protocol.createPayload(response_buf[0..cursor], conn_state.wbuf[conn_state.wbuf_size..]);
-    conn_state.wbuf_size += written;
+    conn_state.wbuf_size += try protocol.createPayload(response_buf[0..cursor], conn_state.writeable_slice());
 }
 
 fn parseRequest(conn_state: *ConnState, buf: []u8, main_mapping: *MainMapping) void {
@@ -234,8 +192,7 @@ fn parseRequest(conn_state: *ConnState, buf: []u8, main_mapping: *MainMapping) v
             // Length check has already been completed
             error.MessageTooLong => unreachable,
             error.InvalidRequest => {
-                const written = protocol.createPayload("Invalid request", conn_state.wbuf[conn_state.wbuf_size..]) catch unreachable;
-                conn_state.wbuf_size += written;
+                conn_state.wbuf_size += protocol.createPayload("Invalid request", conn_state.writeable_slice()) catch unreachable;
             },
         }
     }
@@ -292,7 +249,7 @@ fn tryFillBuffer(conn: GenericConn, main_mapping: *MainMapping) bool {
     std.mem.copyForwards(
         u8,
         conn_state.rbuf[0..conn_state.rbuf_size],
-        conn_state.rbuf[conn_state.rbuf_cursor .. conn_state.rbuf_cursor + conn_state.rbuf_size],
+        conn_state.rbuf[conn_state.rbuf_cursor..][0..conn_state.rbuf_size],
     );
     conn_state.rbuf_cursor = 0;
 
@@ -331,10 +288,10 @@ fn stateReq(conn: GenericConn, main_mapping: *MainMapping) void {
 }
 
 fn tryFlushBuffer(conn: GenericConn) bool {
-    std.debug.print("Try flush buffer\n", .{});
+    std.log.debug("Try flush buffer\n", .{});
     var conn_state = conn.state;
 
-    _ = conn.write(conn_state.wbuf[0..conn_state.wbuf_size]) catch |err|
+    _ = conn.write(conn_state.written_slice()) catch |err|
         switch (err) {
         error.WouldBlock => return false,
         else => {
@@ -362,26 +319,26 @@ fn connectionIo(conn: GenericConn, main_mapping: *MainMapping) !void {
     }
 }
 
-fn acceptNewConnection(fd2conn: *std.AutoArrayHashMap(std.posix.socket_t, *NetConn), server: *std.net.Server) !std.posix.socket_t {
+fn acceptNewConnection(fd2conn: *ConnMapping, server_handle: std.posix.socket_t) !std.posix.socket_t {
     // Built in server.accept method doesn't allow for non-blocking connections
     var accepted_addr: std.net.Address = undefined;
     var addr_len: std.posix.socklen_t = @sizeOf(std.net.Address);
     const fd = try std.posix.accept(
-        server.stream.handle,
+        server_handle,
         &accepted_addr.any,
         &addr_len,
         std.posix.SOCK.NONBLOCK,
     );
-    const client = std.net.Server.Connection{
-        .stream = .{ .handle = fd },
-        .address = accepted_addr,
+    const stream = std.net.Stream{
+        .handle = fd,
     };
-    errdefer client.stream.close();
-    std.log.info("Connection received! {}", .{client.address});
+
+    errdefer stream.close();
+    std.log.info("Connection received! {} (fd={})", .{ accepted_addr, fd });
 
     const conn = try NetConn.init(
         fd2conn.allocator,
-        client.stream,
+        stream,
     );
     errdefer {
         conn.deinit(fd2conn.allocator);
@@ -398,6 +355,40 @@ fn sigintHandler(sig: c_int) callconv(.C) void {
     std.debug.print("\nSIGINT received\n", .{});
     std.debug.panic("sigint panic", .{});
 }
+
+fn handleEvent(
+    event: *const event_loop.Event,
+    epoll_loop: *event_loop.EpollEventLoop,
+    server_handle: std.posix.socket_t,
+    conn_mapping: *ConnMapping,
+    main_mapping: *MainMapping,
+) !void {
+    std.debug.print("Handling event {}\n", .{event});
+    std.debug.print("fd - {}\n", .{event.data.fd});
+
+    if (event.data.fd == server_handle) {
+        // Handle server fd
+        std.debug.print("accept new connection\n", .{});
+        const client_fd = try acceptNewConnection(conn_mapping, server_handle);
+        try epoll_loop.register_client_event(client_fd);
+        return;
+    }
+
+    // Process active client connections
+    const conn = conn_mapping.get(event.data.fd).?;
+    try connectionIo(conn.connection(), main_mapping);
+
+    if (conn.state.state == .END) {
+        std.log.info("Remove connection (fd={})\n", .{conn.stream.handle});
+        conn.connection().close();
+        _ = conn_mapping.swapRemove(event.data.fd);
+        conn.deinit(conn_mapping.allocator);
+    }
+}
+
+pub const std_options = .{
+    .log_level = .info,
+};
 
 pub fn main() !void {
     var gpa_alloc = std.heap.GeneralPurposeAllocator(.{}){};
@@ -417,6 +408,7 @@ pub fn main() !void {
         .reuse_port = true,
     });
     defer server.deinit();
+    const server_handle = server.stream.handle;
 
     std.log.info("Server v0.1 listening on port {}", .{address.getPort()});
 
@@ -429,7 +421,7 @@ pub fn main() !void {
         return error.SignalHandlerError;
     }
 
-    var fd2conn = std.AutoArrayHashMap(std.posix.socket_t, *NetConn).init(allocator);
+    var fd2conn = ConnMapping.init(allocator);
     defer {
         // Make sure to clean up any lasting connections before
         // deiniting the hashmap
@@ -450,38 +442,24 @@ pub fn main() !void {
         main_mapping.deinit();
     }
 
-    var epoll_loop = try event_loop.create_epoll_loop(&server);
-    std.debug.print("Server fd {}\n", .{server.stream.handle});
+    var epoll_loop = try event_loop.create_epoll_loop(server_handle);
+    std.log.debug("Server fd {}\n", .{server_handle});
     while (true) {
 
         // poll for active fds
         const ready_events = try epoll_loop.wait_for_events();
-        if (ready_events <= 0) {
+        if (ready_events.len <= 0) {
             continue;
         }
 
-        for (epoll_loop.events[0..ready_events]) |event| {
-            std.debug.print("Handling event {}\n", .{event});
-            std.debug.print("fd - {}\n", .{event.data.fd});
-
-            if (event.data.fd == server.stream.handle) {
-                // Handle server fd
-                std.debug.print("accept new connection\n", .{});
-                const client_fd = try acceptNewConnection(&fd2conn, &server);
-                try epoll_loop.register_client_event(client_fd);
-                continue;
-            }
-
-            // Process active client connections
-            const conn = fd2conn.get(event.data.fd).?;
-            try connectionIo(conn.connection(), &main_mapping);
-
-            if (conn.state.state == .END) {
-                std.log.info("Remove connection", .{});
-                conn.connection().close();
-                _ = fd2conn.swapRemove(event.data.fd);
-                conn.deinit(allocator);
-            }
+        for (ready_events) |event| {
+            try handleEvent(
+                &event,
+                &epoll_loop,
+                server_handle,
+                &fd2conn,
+                &main_mapping,
+            );
         }
     }
 }
