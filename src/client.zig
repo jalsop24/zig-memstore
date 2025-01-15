@@ -3,6 +3,10 @@ const std = @import("std");
 const protocol = @import("protocol.zig");
 const cli = @import("cli.zig");
 
+pub const std_options = .{
+    .log_level = .info,
+};
+
 pub fn main() !void {
     var gpa_alloc = std.heap.GeneralPurposeAllocator(.{}){};
     defer std.debug.assert(gpa_alloc.deinit() == .ok);
@@ -70,7 +74,7 @@ pub fn main() !void {
 
         // Send contents of write buffer
         const size = try std.posix.write(stream.handle, wbuf[0..wlen]);
-        std.log.info("Sending '{0s}' ({0x}) to server, total sent: {1d} bytes", .{ wbuf[4..wlen], size });
+        std.log.debug("Sending '{0s}' ({0x}) to server, total sent: {1d} bytes", .{ wbuf[4..wlen], size });
 
         var rbuf: [protocol.k_max_msg]u8 = undefined;
         const len = try protocol.receiveMessage(stream.reader().any(), &rbuf);
