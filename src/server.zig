@@ -386,6 +386,10 @@ fn handleEvent(
     }
 }
 
+pub const std_options = .{
+    .log_level = .info,
+};
+
 pub fn main() !void {
     var gpa_alloc = std.heap.GeneralPurposeAllocator(.{}){};
     defer std.debug.assert(gpa_alloc.deinit() == .ok);
@@ -439,7 +443,7 @@ pub fn main() !void {
     }
 
     var epoll_loop = try event_loop.create_epoll_loop(server_handle);
-    std.debug.print("Server fd {}\n", .{server_handle});
+    std.log.debug("Server fd {}\n", .{server_handle});
     while (true) {
 
         // poll for active fds
