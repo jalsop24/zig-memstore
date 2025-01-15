@@ -52,6 +52,8 @@ pub const TestClient = struct {
     sc_stream_buf: [1000]u8,
     sc_stream: FixedBufferStream,
 
+    response_buf: [100]u8,
+
     conn_state: ConnState,
     test_conn: TestConn,
 
@@ -67,6 +69,7 @@ pub const TestClient = struct {
         client.sc_stream_buf = undefined;
         client.cs_stream = undefined;
         client.sc_stream = undefined;
+        client.response_buf = undefined;
         client.conn_state = ConnState{};
 
         client.cs_stream.buffer = client.cs_stream_buf[0..];
@@ -92,30 +95,32 @@ pub const TestClient = struct {
         return self.test_conn.connection();
     }
 
-    pub fn sendRequest(self: *TestClient, buf: []const u8) !void {
+    pub fn sendRequest(self: *TestClient, buf: []const u8) ![]u8 {
         std.debug.print("send req\n", .{});
         _ = try self.cs_stream.write(buf);
         std.debug.print("seek to\n", .{});
         try self.cs_stream.seekTo(0);
         std.debug.print("finish send req\n", .{});
+
+        try connectionIo(self.connection(), self.server.mapping);
+        return try self.getResponse();
     }
 
-    pub fn sendGetRequest(self: *TestClient, key: []const u8) !void {
+    pub fn sendGetRequest(self: *TestClient, key: []const u8) ![]u8 {
         var req_buf: [100]u8 = undefined;
         const req_len = try protocol.createGetReq(key, &req_buf);
         std.debug.print("req_len - {}\n", .{req_len});
 
-        try self.sendRequest(req_buf[0..req_len]);
-        try connectionIo(self.connection(), self.server.mapping);
+        return try self.sendRequest(req_buf[0..req_len]);
     }
 
-    pub fn getResponse(self: *TestClient, buf: []u8) ![]u8 {
+    fn getResponse(self: *TestClient) ![]u8 {
         try self.sc_stream.seekTo(0);
         const response_len = try protocol.receiveMessage(
             self.sc_stream.reader().any(),
-            buf,
+            &self.response_buf,
         );
-        return buf[0..response_len];
+        return self.response_buf[0..response_len];
     }
 };
 

@@ -107,13 +107,7 @@ test "simple get req" {
     defer client.deinit();
     client.server = &server;
 
-    try client.sendGetRequest("key");
-
-    std.debug.print("connection io\n", .{});
-
-    // "Receive" the response from the server to the client
-    var res_buf: [100]u8 = undefined;
-    const response = try client.getResponse(&res_buf);
+    const response = try client.sendGetRequest("key");
 
     // TODO: Parse response properly as it contains length header
     try std.testing.expectEqualStrings("get key -> null", response);
