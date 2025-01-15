@@ -1,6 +1,9 @@
 const std = @import("std");
 const connection = @import("./connection.zig");
 const protocol = @import("./protocol.zig");
+const types = @import("./types.zig");
+const server = @import("server.zig");
+const connectionIo = @import("connection_io.zig").connectionIo;
 
 const ConnState = connection.ConnState;
 const GenericConn = connection.GenericConn;
@@ -52,6 +55,8 @@ pub const TestClient = struct {
     conn_state: ConnState,
     test_conn: TestConn,
 
+    server: *TestServer,
+
     pub fn init(allocator: std.mem.Allocator) !*TestClient {
         var client = try allocator.create(TestClient);
         errdefer allocator.destroy(client);
@@ -87,7 +92,7 @@ pub const TestClient = struct {
         return self.test_conn.connection();
     }
 
-    pub fn send_req(self: *TestClient, buf: []const u8) !void {
+    pub fn sendRequest(self: *TestClient, buf: []const u8) !void {
         std.debug.print("send req\n", .{});
         _ = try self.cs_stream.write(buf);
         std.debug.print("seek to\n", .{});
@@ -95,11 +100,25 @@ pub const TestClient = struct {
         std.debug.print("finish send req\n", .{});
     }
 
-    pub fn get_res(self: *TestClient, buf: []u8) !usize {
+    pub fn sendGetRequest(self: *TestClient, key: []const u8) !void {
+        var req_buf: [100]u8 = undefined;
+        const req_len = try protocol.createGetReq(key, &req_buf);
+        std.debug.print("req_len - {}\n", .{req_len});
+
+        try self.sendRequest(req_buf[0..req_len]);
+        try connectionIo(self.connection(), self.server.mapping);
+    }
+
+    pub fn getResponse(self: *TestClient, buf: []u8) ![]u8 {
         try self.sc_stream.seekTo(0);
-        return try protocol.receiveMessage(
+        const response_len = try protocol.receiveMessage(
             self.sc_stream.reader().any(),
             buf,
         );
+        return buf[0..response_len];
     }
+};
+
+pub const TestServer = struct {
+    mapping: *types.MainMapping,
 };
