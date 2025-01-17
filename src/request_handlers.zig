@@ -1,0 +1,195 @@
+const std = @import("std");
+
+const connection = @import("connection.zig");
+const protocol = @import("protocol.zig");
+const types = @import("types.zig");
+
+const ConnState = connection.ConnState;
+const MainMapping = types.MainMapping;
+const MessageBuffer = protocol.MessageBuffer;
+const String = types.String;
+
+const HandleRequestError = error{InvalidRequest} || protocol.PayloadCreationError;
+
+pub fn parseRequest(conn_state: *ConnState, buf: []u8, main_mapping: *MainMapping) void {
+
+    // Support get, set, del
+
+    // first 3 bytes are the type of command
+    if (buf.len < 3) return handleUnknownCommand(conn_state, buf);
+
+    var err: ?HandleRequestError = null;
+    switch (protocol.parseCommand(buf[0..3])) {
+        .Get => handleGetCommand(conn_state, buf, main_mapping) catch |e| {
+            err = e;
+        },
+        .Set => handleSetCommand(conn_state, buf, main_mapping) catch |e| {
+            err = e;
+        },
+        .Delete => handleDeleteCommand(conn_state, buf, main_mapping) catch |e| {
+            err = e;
+        },
+        .List => handleListCommand(conn_state, buf, main_mapping) catch |e| {
+            err = e;
+        },
+        .Unknown => handleUnknownCommand(conn_state, buf),
+    }
+
+    if (err != null) {
+        switch (err.?) {
+            // Length check has already been completed
+            error.MessageTooLong => unreachable,
+            error.InvalidRequest => {
+                writeResponse(conn_state, "Invalid request") catch unreachable;
+            },
+        }
+    }
+}
+
+fn writeResponse(conn_state: *ConnState, response: []const u8) protocol.PayloadCreationError!void {
+    conn_state.wbuf_size += try protocol.createPayload(response, conn_state.writeable_slice());
+}
+
+fn handleUnknownCommand(conn_state: *ConnState, bytes: []const u8) void {
+    std.log.info("Client says '{s}'", .{bytes});
+    // Generate echo response
+    @memcpy(
+        conn_state.wbuf[0 .. protocol.len_header_size + bytes.len],
+        conn_state.rbuf[conn_state.rbuf_cursor..][0 .. protocol.len_header_size + bytes.len],
+    );
+
+    conn_state.wbuf_size = protocol.len_header_size + bytes.len;
+}
+
+fn handleGetCommand(conn_state: *ConnState, buf: []u8, main_mapping: *MainMapping) HandleRequestError!void {
+    std.log.info("Get command '{0s}' ({0x})", .{buf});
+
+    if (buf.len < 5) {
+        std.log.debug("Invalid request - {s} (len = {})", .{ buf, buf.len });
+        return HandleRequestError.InvalidRequest;
+    }
+
+    const key = protocol.parseString(buf[3..]) catch |err| switch (err) {
+        error.InvalidString => {
+            std.log.debug("Failed to parse key {s}", .{buf[3..]});
+            return HandleRequestError.InvalidRequest;
+        },
+    };
+
+    std.log.info("Get key '{s}'", .{key});
+    const raw_value = main_mapping.get(key);
+
+    std.log.debug("content", .{});
+    const value: []u8 = if (raw_value) |str|
+        str.content
+    else
+        @constCast(@ptrCast("null"));
+
+    const response_format = "get {s} -> {s}";
+
+    var response_buf: MessageBuffer = undefined;
+    const response = std.fmt.bufPrint(&response_buf, response_format, .{ key, value }) catch |err|
+        switch (err) {
+        error.NoSpaceLeft => unreachable,
+    };
+
+    try writeResponse(conn_state, response);
+}
+
+fn handleSetCommand(conn_state: *ConnState, buf: []u8, main_mapping: *MainMapping) HandleRequestError!void {
+    std.log.info("Set command '{0s}' ({0x})", .{buf});
+
+    if (buf.len < 5) {
+        std.log.debug("Invalid request - {s} (len = {})", .{ buf, buf.len });
+        return HandleRequestError.InvalidRequest;
+    }
+
+    const key = protocol.parseString(buf[3..]) catch |err| switch (err) {
+        error.InvalidString => {
+            std.log.debug("Failed to parse key {s}", .{buf[3..]});
+            return HandleRequestError.InvalidRequest;
+        },
+    };
+    std.log.info("Key {s}", .{key});
+
+    const value = protocol.parseString(buf[5 + key.len ..]) catch |err| switch (err) {
+        error.InvalidString => {
+            std.log.debug("Failed to parse value {s}", .{buf[5 + key.len ..]});
+            return HandleRequestError.InvalidRequest;
+        },
+    };
+
+    const new_key = main_mapping.allocator.alloc(u8, key.len) catch return HandleRequestError.InvalidRequest;
+    errdefer main_mapping.allocator.free(new_key);
+    @memcpy(new_key, key);
+
+    const new_val = String.init(main_mapping.allocator, value) catch |err| switch (err) {
+        error.OutOfMemory => return HandleRequestError.InvalidRequest,
+    };
+    errdefer new_val.deinit(main_mapping.allocator);
+
+    main_mapping.put(new_key, new_val) catch {
+        std.log.debug("Failed to put into mapping {any}", .{new_val});
+        return HandleRequestError.InvalidRequest;
+    };
+
+    const response = "created";
+    writeResponse(conn_state, response) catch unreachable;
+}
+
+fn handleDeleteCommand(conn_state: *ConnState, buf: []const u8, main_mapping: *MainMapping) HandleRequestError!void {
+    std.log.info("Delete command '{0s}' (0x)", .{buf});
+
+    if (buf.len < 5) {
+        std.log.debug("Invalid request - {s} (len = {})", .{ buf, buf.len });
+        return HandleRequestError.InvalidRequest;
+    }
+
+    const key = protocol.parseString(buf[3..]) catch |err| switch (err) {
+        error.InvalidString => return HandleRequestError.InvalidRequest,
+    };
+
+    const removed = main_mapping.swapRemove(key);
+
+    const response_format = "del {s} -> {}";
+
+    var response_buf: MessageBuffer = undefined;
+    const response = std.fmt.bufPrint(
+        &response_buf,
+        response_format,
+        .{ key, removed },
+    ) catch |err|
+        switch (err) {
+        error.NoSpaceLeft => unreachable,
+    };
+
+    try writeResponse(conn_state, response);
+}
+
+fn handleListCommand(conn_state: *ConnState, buf: []const u8, main_mapping: *MainMapping) HandleRequestError!void {
+    std.log.info("List command '{0s}' (0x)", .{buf});
+
+    const keys = main_mapping.keys();
+
+    std.debug.print("total keys {d}\n", .{keys.len});
+
+    if (keys.len == 0) {
+        try writeResponse(conn_state, "no keys");
+        return;
+    }
+
+    var response_buf: [1_000]u8 = undefined;
+    var cursor: usize = 0;
+
+    for (main_mapping.keys()) |key| {
+        std.debug.print("key: {s}\n", .{key});
+        const value = main_mapping.get(key).?;
+        const slice = std.fmt.bufPrint(response_buf[cursor..], "{s} = {s},", .{ key, value.content }) catch |err|
+            switch (err) {
+            error.NoSpaceLeft => return HandleRequestError.MessageTooLong,
+        };
+        cursor += slice.len;
+    }
+
+    try writeResponse(conn_state, response_buf[0..cursor]);
+}

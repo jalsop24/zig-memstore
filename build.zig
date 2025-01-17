@@ -17,7 +17,7 @@ pub fn build(b: *std.Build) void {
 
     const server_exe = b.addExecutable(.{
         .name = "zig-memstore",
-        .root_source_file = b.path("src/server.zig"),
+        .root_source_file = b.path("src/main.zig"),
         .target = target,
         .optimize = optimize,
     });

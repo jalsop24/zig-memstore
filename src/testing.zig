@@ -1,6 +1,9 @@
 const std = @import("std");
 const connection = @import("./connection.zig");
 const protocol = @import("./protocol.zig");
+const types = @import("./types.zig");
+const server = @import("server.zig");
+const connectionIo = @import("connection_io.zig").connectionIo;
 
 const ConnState = connection.ConnState;
 const GenericConn = connection.GenericConn;
@@ -49,8 +52,12 @@ pub const TestClient = struct {
     sc_stream_buf: [1000]u8,
     sc_stream: FixedBufferStream,
 
+    response_buf: [100]u8,
+
     conn_state: ConnState,
     test_conn: TestConn,
+
+    server: *TestServer,
 
     pub fn init(allocator: std.mem.Allocator) !*TestClient {
         var client = try allocator.create(TestClient);
@@ -62,6 +69,7 @@ pub const TestClient = struct {
         client.sc_stream_buf = undefined;
         client.cs_stream = undefined;
         client.sc_stream = undefined;
+        client.response_buf = undefined;
         client.conn_state = ConnState{};
 
         client.cs_stream.buffer = client.cs_stream_buf[0..];
@@ -87,19 +95,35 @@ pub const TestClient = struct {
         return self.test_conn.connection();
     }
 
-    pub fn send_req(self: *TestClient, buf: []const u8) !void {
+    pub fn sendRequest(self: *TestClient, buf: []const u8) ![]u8 {
         std.debug.print("send req\n", .{});
         _ = try self.cs_stream.write(buf);
         std.debug.print("seek to\n", .{});
         try self.cs_stream.seekTo(0);
         std.debug.print("finish send req\n", .{});
+
+        try connectionIo(self.connection(), self.server.mapping);
+        return try self.getResponse();
     }
 
-    pub fn get_res(self: *TestClient, buf: []u8) !usize {
-        try self.sc_stream.seekTo(0);
-        return try protocol.receiveMessage(
-            self.sc_stream.reader().any(),
-            buf,
-        );
+    pub fn sendGetRequest(self: *TestClient, key: []const u8) ![]u8 {
+        var req_buf: [100]u8 = undefined;
+        const req_len = try protocol.createGetReq(key, &req_buf);
+        std.debug.print("req_len - {}\n", .{req_len});
+
+        return try self.sendRequest(req_buf[0..req_len]);
     }
+
+    fn getResponse(self: *TestClient) ![]u8 {
+        try self.sc_stream.seekTo(0);
+        const response_len = try protocol.receiveMessage(
+            self.sc_stream.reader().any(),
+            &self.response_buf,
+        );
+        return self.response_buf[0..response_len];
+    }
+};
+
+pub const TestServer = struct {
+    mapping: *types.MainMapping,
 };

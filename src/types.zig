@@ -1,4 +1,8 @@
 const std = @import("std");
+const NetConn = @import("NetConn.zig");
+
+pub const MainMapping = std.StringArrayHashMap(*String);
+pub const ConnMapping = std.AutoArrayHashMap(std.posix.socket_t, *NetConn);
 
 pub const String = struct {
     content: []u8,
