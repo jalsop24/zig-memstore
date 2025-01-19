@@ -13,6 +13,8 @@ const NetConn = @import("NetConn.zig");
 const MainMapping = types.MainMapping;
 const ConnMapping = types.ConnMapping;
 
+const Command = protocol.Command;
+
 pub const Server = struct {
     handle: std.posix.socket_t,
     mapping: *MainMapping,
@@ -109,6 +111,12 @@ test "simple get req" {
 
     const response = try client.sendGetRequest("key");
 
-    // TODO: Parse response properly as it contains length header
-    try std.testing.expectEqualStrings("get key -> null", response);
+    std.debug.print("response = {x}\n", .{response});
+
+    const command = protocol.decodeCommand(response);
+    try std.testing.expectEqual(command, Command.Get);
+
+    const get_reponse = try protocol.parseGetResponse(response[protocol.COMMAND_LEN_BYTES..]);
+    try std.testing.expectEqualStrings(get_reponse.key.content, "key");
+    try std.testing.expectEqual(get_reponse.value, null);
 }

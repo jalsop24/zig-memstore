@@ -73,6 +73,24 @@ pub fn receiveMessage(reader: std.io.AnyReader, buf: []u8) !usize {
     return m_read;
 }
 
+pub const GetResponse = struct {
+    key: types.String,
+    value: ?types.String,
+};
+
+pub fn parseGetResponse(buf: []const u8) !GetResponse {
+    const key = try decodeString(buf);
+    const value: ?types.String = decodeString(buf[STR_LEN_BYTES + key.content.len ..]) catch |err| blk: {
+        switch (err) {
+            DecodeError.InvalidString => break :blk null,
+        }
+    };
+    return .{
+        .key = key,
+        .value = value,
+    };
+}
+
 fn commandIs(buf: []const u8, command: []const u8) bool {
     return std.mem.eql(u8, buf, command);
 }
