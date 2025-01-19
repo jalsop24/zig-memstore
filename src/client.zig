@@ -3,8 +3,10 @@ const std = @import("std");
 const protocol = @import("protocol.zig");
 const cli = @import("cli.zig");
 
+const LogLevel = std.log.Level;
+
 pub const std_options = .{
-    .log_level = .info,
+    .log_level = LogLevel.debug,
 };
 
 pub fn main() !void {
@@ -78,6 +80,6 @@ pub fn main() !void {
 
         var rbuf: [protocol.k_max_msg]u8 = undefined;
         const len = try protocol.receiveMessage(stream.reader().any(), &rbuf);
-        std.log.info("Received from server '{s}'", .{rbuf[0..len]});
+        std.log.info("Received from server '{0s}' ({0x})", .{rbuf[0..len]});
     }
 }
