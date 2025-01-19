@@ -16,37 +16,28 @@ const DecodeError = protocol.DecodeError;
 const EncodeError = protocol.EncodeError;
 
 pub fn parseRequest(conn_state: *ConnState, buf: []u8, main_mapping: *MainMapping) void {
+    parseRequestInner(conn_state, buf, main_mapping) catch |err| switch (err) {
+        // Length check has already been completed
+        HandleRequestError.MessageTooLong => unreachable,
+        HandleRequestError.InvalidRequest => {
+            writeResponse(conn_state, "Invalid request") catch unreachable;
+        },
+    };
+}
+
+fn parseRequestInner(conn_state: *ConnState, buf: []u8, main_mapping: *MainMapping) HandleRequestError!void {
 
     // Support get, set, del
 
-    // first 3 bytes are the type of command
-    if (buf.len < 3) return handleUnknownCommand(conn_state, buf);
+    if (buf.len < protocol.COMMAND_LEN_BYTES) return handleUnknownCommand(conn_state, buf);
 
-    var err: ?HandleRequestError = null;
-    switch (protocol.parseCommand(buf[0..3])) {
-        .Get => handleGetCommand(conn_state, buf, main_mapping) catch |e| {
-            err = e;
-        },
-        .Set => handleSetCommand(conn_state, buf, main_mapping) catch |e| {
-            err = e;
-        },
-        .Delete => handleDeleteCommand(conn_state, buf, main_mapping) catch |e| {
-            err = e;
-        },
-        .List => handleListCommand(conn_state, buf, main_mapping) catch |e| {
-            err = e;
-        },
+    const command = protocol.decodeCommand(buf) catch return HandleRequestError.InvalidRequest;
+    switch (command) {
+        .Get => try handleGetCommand(conn_state, buf[protocol.COMMAND_LEN_BYTES..], main_mapping),
+        .Set => try handleSetCommand(conn_state, buf[protocol.COMMAND_LEN_BYTES..], main_mapping),
+        .Delete => try handleDeleteCommand(conn_state, buf[protocol.COMMAND_LEN_BYTES..], main_mapping),
+        .List => try handleListCommand(conn_state, buf[protocol.COMMAND_LEN_BYTES..], main_mapping),
         .Unknown => handleUnknownCommand(conn_state, buf),
-    }
-
-    if (err != null) {
-        switch (err.?) {
-            // Length check has already been completed
-            error.MessageTooLong => unreachable,
-            error.InvalidRequest => {
-                writeResponse(conn_state, "Invalid request") catch unreachable;
-            },
-        }
     }
 }
 
@@ -68,14 +59,14 @@ fn handleUnknownCommand(conn_state: *ConnState, bytes: []const u8) void {
 fn handleGetCommand(conn_state: *ConnState, buf: []u8, main_mapping: *MainMapping) HandleRequestError!void {
     std.log.info("Get command '{0s}' ({0x})", .{buf});
 
-    if (buf.len < 5) {
+    if (buf.len < protocol.STR_LEN_BYTES) {
         std.log.debug("Invalid request - {s} (len = {})", .{ buf, buf.len });
         return HandleRequestError.InvalidRequest;
     }
 
-    const key = protocol.decodeString(buf[3..]) catch |err| switch (err) {
+    const key = protocol.decodeString(buf) catch |err| switch (err) {
         error.InvalidString => {
-            std.log.debug("Failed to parse key {s}", .{buf[3..]});
+            std.log.debug("Failed to parse key {s}", .{buf});
             return HandleRequestError.InvalidRequest;
         },
     };
@@ -103,20 +94,20 @@ fn handleGetCommand(conn_state: *ConnState, buf: []u8, main_mapping: *MainMappin
 fn handleSetCommand(conn_state: *ConnState, buf: []u8, main_mapping: *MainMapping) HandleRequestError!void {
     std.log.info("Set command '{0s}' ({0x})", .{buf});
 
-    if (buf.len < 5) {
+    if (buf.len < 2 * protocol.STR_LEN_BYTES) {
         std.log.debug("Invalid request - {s} (len = {})", .{ buf, buf.len });
         return HandleRequestError.InvalidRequest;
     }
 
-    const key = protocol.decodeString(buf[3..]) catch |err| switch (err) {
+    const key = protocol.decodeString(buf) catch |err| switch (err) {
         DecodeError.InvalidString => {
-            std.log.debug("Failed to parse key {s}", .{buf[3..]});
+            std.log.debug("Failed to parse key {s}", .{buf});
             return HandleRequestError.InvalidRequest;
         },
     };
     std.log.info("Key {s}", .{key.content});
 
-    const value_buf = buf[5 + key.content.len ..];
+    const value_buf = buf[key.content.len + protocol.STR_LEN_BYTES ..];
     const value = protocol.decodeString(value_buf) catch |err| switch (err) {
         DecodeError.InvalidString => {
             std.log.debug("Failed to parse value {s}", .{value_buf});
@@ -145,12 +136,12 @@ fn handleSetCommand(conn_state: *ConnState, buf: []u8, main_mapping: *MainMappin
 fn handleDeleteCommand(conn_state: *ConnState, buf: []const u8, main_mapping: *MainMapping) HandleRequestError!void {
     std.log.info("Delete command '{0s}' (0x)", .{buf});
 
-    if (buf.len < 5) {
+    if (buf.len < protocol.STR_LEN_BYTES) {
         std.log.debug("Invalid request - {s} (len = {})", .{ buf, buf.len });
         return HandleRequestError.InvalidRequest;
     }
 
-    const key = protocol.decodeString(buf[3..]) catch |err| switch (err) {
+    const key = protocol.decodeString(buf) catch |err| switch (err) {
         DecodeError.InvalidString => return HandleRequestError.InvalidRequest,
     };
 
@@ -160,7 +151,7 @@ fn handleDeleteCommand(conn_state: *ConnState, buf: []const u8, main_mapping: *M
     var response_len: protocol.MessageLen = 0;
     response_len += protocol.encodeCommand(Command.Delete, response_buf[response_len..]);
     response_len += protocol.encodeString(key, response_buf[response_len..]) catch |err| switch (err) {
-        EncodeError.String => return HandleRequestError.InvalidRequest,
+        EncodeError.BufferTooSmall => return HandleRequestError.InvalidRequest,
     };
 
     try writeResponse(conn_state, response_buf[0..response_len]);

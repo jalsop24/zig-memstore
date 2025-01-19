@@ -11,19 +11,22 @@ pub const k_max_msg: usize = 4096;
 pub const StringLen = u16;
 pub const STR_LEN_BYTES = @sizeOf(StringLen);
 
+pub const CommandLen = u8;
+pub const COMMAND_LEN_BYTES = @sizeOf(CommandLen);
+
 pub const PayloadCreationError = error{MessageTooLong};
 
 pub const MessageBuffer = [len_header_size + k_max_msg]u8;
 
-pub const EncodeError = error{String};
+pub const EncodeError = error{BufferTooSmall};
 pub const DecodeError = error{InvalidString};
 
-pub const Command = enum {
-    Get,
-    Set,
-    Delete,
-    List,
-    Unknown,
+pub const Command = enum(CommandLen) {
+    Get = 1,
+    Set = 2,
+    Delete = 3,
+    List = 4,
+    Unknown = 5,
 
     pub const GET_LITERAL = "get";
     pub const SET_LITERAL = "set";
@@ -85,7 +88,11 @@ pub fn parseCommand(buf: []const u8) Command {
     return Command.Unknown;
 }
 
-pub fn encodeCommand(command: Command, buf: []u8) u1 {
+pub fn decodeCommand(buf: []const u8) !Command {
+    return try std.meta.intToEnum(Command, buf[0]);
+}
+
+pub fn encodeCommand(command: Command, buf: []u8) u8 {
     std.mem.writePackedInt(
         u8,
         buf,
@@ -118,11 +125,11 @@ pub fn decodeString(buf: []const u8) DecodeError!types.String {
     return types.String{ .content = buf[2..][0..str_len] };
 }
 
-pub fn encodeString(string: types.String, buf: []u8) EncodeError!MessageLen {
+pub fn encodeString(string: types.String, buf: []u8) EncodeError!StringLen {
     const len: StringLen = @intCast(string.content.len);
 
     if (buf.len < STR_LEN_BYTES + len) {
-        return EncodeError.String;
+        return EncodeError.BufferTooSmall;
     }
 
     std.mem.writePackedInt(
@@ -136,147 +143,115 @@ pub fn encodeString(string: types.String, buf: []u8) EncodeError!MessageLen {
     return STR_LEN_BYTES + len;
 }
 
-fn readWord(buf: []const u8, out_buf: []u8) !struct { u16, u32 } {
+fn readWord(buf: []const u8) !struct { u16, usize } {
     std.log.debug("Read word from buf '{s}'", .{buf});
 
-    var start: u32 = 0;
+    if (buf.len == 0) {
+        return .{ 0, 0 };
+    }
+
+    var start: usize = 0;
     // Consume all leading whitespace
     for (0..buf.len) |i| {
+        std.log.debug("buf[{1d}] '{0c}' ({0x})", .{ buf[i], i });
         if (buf[i] != ' ') {
             start = @intCast(i);
             break;
         }
     }
     // What if that loop gets all the way to the end of the buffer?
-    var end: u32 = 0;
+    var end: usize = start;
     for (start..buf.len) |i| {
-        std.log.debug("char {c}", .{buf[i]});
-        end = @intCast(i);
+        std.log.debug("buf[{1d}] '{0c}' ({0x})", .{ buf[i], i });
+        end = i;
         if (buf[i] == ' ' or buf[i] == '\n') {
             end -= 1;
             break;
         }
 
-        if (i - start > out_buf.len or i - start > 2 ^ 16 - 1) return error.WordTooLong;
-
-        // Copy key char into output buffer
-        out_buf[i - start] = buf[i];
+        if (i - start > 2 ^ 16 - 1) return error.WordTooLong;
     }
 
-    return .{ @intCast(end + 1 - start), end + 1 };
+    return .{ @intCast(start), end + 1 };
 }
 
-fn parseWord(buf: []const u8, out_buf: []u8) !struct { u16, u32 } {
-    const w_len, const bytes_read = try readWord(buf, out_buf[2..]);
+fn parseWord(buf: []const u8, out_buf: []u8) !struct { StringLen, usize } {
+    const start, const end = try readWord(buf);
 
-    std.mem.writePackedInt(
-        u16,
-        out_buf[0..2],
-        0,
-        w_len,
-        native_endian,
+    std.log.debug(
+        "'{s}' start = {d}, end = {d}, buf.len = {d}",
+        .{ buf[start..end], start, end, buf.len },
     );
-
-    return .{ w_len, bytes_read };
+    const total_written = try encodeString(
+        .{ .content = buf[start..end] },
+        out_buf,
+    );
+    return .{ total_written, end };
 }
 
 pub fn createGetReq(message: []const u8, wbuf: []u8) !MessageLen {
     const out_buf = wbuf[len_header_size..];
-
-    @memcpy(out_buf[0..3], Command.GET_LITERAL);
+    var m_len: MessageLen = 0;
+    m_len += encodeCommand(Command.Get, out_buf);
 
     // Parse the key back into the input buffer
-    const key_len, _ = try parseWord(message, out_buf[3..]);
+    const key_len, _ = try parseWord(message, out_buf[m_len..]);
+    m_len += key_len;
     std.log.debug("Key length {}", .{key_len});
 
-    // 3 Bytes for command
-    // 2 bytes for key length
-    // key_len bytes for key content
-    const m_len: MessageLen = 3 + 2 + key_len;
-
-    // Write 4 byte total message length header
-    std.mem.writePackedInt(
-        MessageLen,
-        wbuf[0..len_header_size],
-        0,
-        m_len,
-        native_endian,
-    );
+    writeHeader(m_len, wbuf);
     return len_header_size + m_len;
 }
 
 pub fn createSetReq(message: []const u8, wbuf: []u8) !MessageLen {
     const out_buf = wbuf[len_header_size..];
-    @memcpy(out_buf[0..3], Command.SET_LITERAL);
+    var m_len: MessageLen = 0;
+    m_len += encodeCommand(Command.Set, out_buf);
 
-    const key_len, const bytes_read = try parseWord(message, out_buf[3..]);
+    const key_len, const bytes_read = try parseWord(message, out_buf[m_len..]);
+    m_len += key_len;
     std.log.debug("Key length {}", .{key_len});
     std.log.debug("Bytes read {}", .{bytes_read});
 
-    // Parse value into out_buffer at 5 + key_len position:
-    // 3 bytes for "set"
-    // 2 bytes for key_len
-    // key_len bytes for key
-    const val_len, _ = try parseWord(message[bytes_read..], out_buf[5 + key_len ..]);
+    const val_len, _ = try parseWord(message[bytes_read..], out_buf[m_len..]);
+    m_len += val_len;
     std.log.debug("Val length {}", .{val_len});
 
-    // 3 Bytes for command
-    // 2 bytes for key length
-    // key_len bytes for key content
-    // 2 bytes for val length
-    // val_len bytes for val content
-    const m_len: MessageLen = 3 + 2 + key_len + 2 + val_len;
-
-    // Write len_header_size byte total message length header
-    std.mem.writePackedInt(
-        MessageLen,
-        wbuf[0..len_header_size],
-        0,
-        m_len,
-        native_endian,
-    );
+    writeHeader(m_len, wbuf);
     return len_header_size + m_len;
 }
 
 pub fn createDelReq(message: []const u8, wbuf: []u8) !MessageLen {
     const out_buf = wbuf[len_header_size..];
-    @memcpy(out_buf[0..3], Command.DELETE_LITERAL);
+    var m_len: MessageLen = 0;
+    m_len += encodeCommand(Command.Delete, out_buf);
 
     // Parse the key back into the input buffer
-    const key_len, _ = try parseWord(message, out_buf[3..]);
+    const key_len, _ = try parseWord(message, out_buf[m_len..]);
+    m_len += key_len;
     std.log.debug("Key length {}", .{key_len});
 
-    // 3 Bytes for command
-    // 2 bytes for key length
-    // key_len bytes for key content
-    const m_len: MessageLen = 3 + 2 + key_len;
-
-    // Write len_header_size byte total message length header
-    std.mem.writePackedInt(
-        MessageLen,
-        wbuf[0..len_header_size],
-        0,
-        m_len,
-        native_endian,
-    );
+    writeHeader(m_len, wbuf);
     return len_header_size + m_len;
 }
 
 pub fn createListReq(message: []const u8, wbuf: []u8) !MessageLen {
     _ = message;
     const out_buf = wbuf[len_header_size..];
-    @memcpy(out_buf[0..3], Command.LIST_LITERAL);
-
-    // Message is just the command name itself (no arguments)
-    const m_len = 3;
+    var m_len: MessageLen = 0;
+    m_len += encodeCommand(Command.List, out_buf);
 
     // Write len_header_size byte total message length header
+    writeHeader(m_len, wbuf);
+    return len_header_size + m_len;
+}
+
+fn writeHeader(message_len: MessageLen, buf: []u8) void {
     std.mem.writePackedInt(
         MessageLen,
-        wbuf[0..len_header_size],
+        buf[0..len_header_size],
         0,
-        m_len,
+        message_len,
         native_endian,
     );
-    return len_header_size + m_len;
 }
