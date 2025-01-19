@@ -1,14 +1,22 @@
 const std = @import("std");
 const builtin = @import("builtin");
+const types = @import("types.zig");
+
 const native_endian = builtin.cpu.arch.endian();
 
 pub const MessageLen = u32;
 pub const len_header_size: u8 = @sizeOf(MessageLen);
 pub const k_max_msg: usize = 4096;
 
+pub const StringLen = u16;
+pub const STR_LEN_BYTES = @sizeOf(StringLen);
+
 pub const PayloadCreationError = error{MessageTooLong};
 
 pub const MessageBuffer = [len_header_size + k_max_msg]u8;
+
+pub const EncodeError = error{String};
+pub const DecodeError = error{InvalidString};
 
 pub const Command = enum {
     Get,
@@ -77,26 +85,55 @@ pub fn parseCommand(buf: []const u8) Command {
     return Command.Unknown;
 }
 
+pub fn encodeCommand(command: Command, buf: []u8) u1 {
+    std.mem.writePackedInt(
+        u8,
+        buf,
+        0,
+        @intFromEnum(command),
+        native_endian,
+    );
+    return 1;
+}
+
 /// Parses the given buffer by assuming the first two bytes are the
 /// length of the string as a u16, then reads the next 'length' bytes
 /// from the buffer
-pub fn parseString(buf: []const u8) error{InvalidString}![]const u8 {
+pub fn decodeString(buf: []const u8) DecodeError!types.String {
     if (buf.len < 2) {
-        return error.InvalidString;
+        return DecodeError.InvalidString;
     }
 
     const str_len = std.mem.readPackedInt(
-        u16,
+        StringLen,
         buf[0..2],
         0,
         native_endian,
     );
 
-    if (buf.len - 2 < str_len) {
-        return error.InvalidString;
+    if (buf.len < STR_LEN_BYTES + str_len) {
+        return DecodeError.InvalidString;
     }
 
-    return buf[2..][0..str_len];
+    return types.String{ .content = buf[2..][0..str_len] };
+}
+
+pub fn encodeString(string: types.String, buf: []u8) EncodeError!MessageLen {
+    const len: StringLen = @intCast(string.content.len);
+
+    if (buf.len < STR_LEN_BYTES + len) {
+        return EncodeError.String;
+    }
+
+    std.mem.writePackedInt(
+        StringLen,
+        buf,
+        0,
+        len,
+        native_endian,
+    );
+    @memcpy(buf[STR_LEN_BYTES..][0..len], string.content);
+    return STR_LEN_BYTES + len;
 }
 
 fn readWord(buf: []const u8, out_buf: []u8) !struct { u16, u32 } {
