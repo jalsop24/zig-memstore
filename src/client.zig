@@ -51,6 +51,12 @@ pub fn main() !void {
         var message = try cli_reader.readUntilDelimiterOrEof(&input_buf, DELIMITER) orelse return;
         var wlen: u32 = 0;
 
+        std.log.debug("received message '{s}'", .{message});
+
+        if (std.mem.eql(u8, message, "exit")) {
+            break;
+        }
+
         switch (protocol.parseCommand(message)) {
             .Get => {
                 wlen = try protocol.createGetReq(message[3..], &wbuf);
@@ -65,10 +71,6 @@ pub fn main() !void {
                 wlen = try protocol.createListReq(message[3..], &wbuf);
             },
             .Unknown => {
-                if (std.mem.eql(u8, message, "exit")) {
-                    break;
-                }
-
                 std.log.info("Unknown command", .{});
                 wlen = try protocol.createPayload(message, &wbuf);
             },
