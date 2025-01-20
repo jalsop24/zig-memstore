@@ -17,6 +17,5 @@ pub const String = struct {
 
     pub fn deinit(self: *const String, allocator: std.mem.Allocator) void {
         allocator.free(self.content);
-        allocator.destroy(self);
     }
 };
