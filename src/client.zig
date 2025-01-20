@@ -30,6 +30,7 @@ fn handleGetResponse(buf: []const u8) !void {
 
     if (get_response.value) |value| {
         std.log.info("Get response '{0s}' -> '{1s}'", .{ key.content, value.content });
+        return;
     }
 
     std.log.info("Get response '{0s}' -> null", .{key.content});
