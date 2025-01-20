@@ -151,3 +151,33 @@ test "set req" {
     try std.testing.expectEqualStrings(set_reponse.key.content, "a");
     try std.testing.expectEqualStrings(set_reponse.value.content, "1");
 }
+
+test "del req" {
+    const allocator = std.testing.allocator;
+    var mapping = MainMapping.init(allocator);
+    defer {
+        for (mapping.keys(), mapping.values()) |key, val| {
+            allocator.free(key);
+            val.deinit(allocator);
+        }
+        mapping.deinit();
+    }
+
+    var server = testing.TestServer{
+        .mapping = &mapping,
+    };
+
+    const client = try testing.TestClient.init(allocator);
+    defer client.deinit();
+    client.server = &server;
+
+    const response = try client.sendDeleteRequest("a");
+
+    std.debug.print("response = {x}\n", .{response});
+
+    const command = protocol.decodeCommand(response);
+    try std.testing.expectEqual(command, Command.Delete);
+
+    const delete_reponse = try protocol.decodeDeleteResponse(response[protocol.COMMAND_LEN_BYTES..]);
+    try std.testing.expectEqualStrings(delete_reponse.key.content, "a");
+}
