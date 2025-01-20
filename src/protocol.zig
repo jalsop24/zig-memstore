@@ -91,6 +91,20 @@ pub fn parseGetResponse(buf: []const u8) !GetResponse {
     };
 }
 
+pub const SetResponse = struct {
+    key: types.String,
+    value: types.String,
+};
+
+pub fn parseSetResponse(buf: []const u8) !SetResponse {
+    const key = try decodeString(buf);
+    const value = try decodeString(buf[STR_LEN_BYTES + key.content.len ..]);
+    return .{
+        .key = key,
+        .value = value,
+    };
+}
+
 fn commandIs(buf: []const u8, command: []const u8) bool {
     return std.mem.eql(u8, buf, command);
 }

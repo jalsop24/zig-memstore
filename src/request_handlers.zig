@@ -77,13 +77,9 @@ fn handleGetCommand(conn_state: *ConnState, buf: []u8, main_mapping: *MainMappin
     var response_buf: MessageBuffer = undefined;
     var written: protocol.MessageLen = 0;
     written += protocol.encodeCommand(Command.Get, response_buf[written..]);
-    written += protocol.encodeString(key, response_buf[written..]) catch |err| switch (err) {
-        EncodeError.BufferTooSmall => return HandleRequestError.InvalidRequest,
-    };
+    written += try encodeString(key, response_buf[written..]);
     if (value) |value_string| {
-        written += protocol.encodeString(value_string, response_buf[written..]) catch |err| switch (err) {
-            EncodeError.BufferTooSmall => return HandleRequestError.InvalidRequest,
-        };
+        written += try encodeString(value_string, response_buf[written..]);
     }
 
     const response = response_buf[0..written];
@@ -128,8 +124,13 @@ fn handleSetCommand(conn_state: *ConnState, buf: []u8, main_mapping: *MainMappin
         return HandleRequestError.InvalidRequest;
     };
 
-    const response = "created";
-    writeResponse(conn_state, response) catch unreachable;
+    var response_buf: MessageBuffer = undefined;
+    var written: protocol.MessageLen = 0;
+    written += protocol.encodeCommand(Command.Set, response_buf[written..]);
+    written += try encodeString(key, response_buf[written..]);
+    written += try encodeString(value, response_buf[written..]);
+
+    try writeResponse(conn_state, response_buf[0..written]);
 }
 
 fn handleDeleteCommand(conn_state: *ConnState, buf: []const u8, main_mapping: *MainMapping) HandleRequestError!void {
@@ -182,4 +183,10 @@ fn handleListCommand(conn_state: *ConnState, buf: []const u8, main_mapping: *Mai
     }
 
     try writeResponse(conn_state, response_buf[0..cursor]);
+}
+
+fn encodeString(string: String, buf: []u8) HandleRequestError!protocol.StringLen {
+    return protocol.encodeString(string, buf) catch |err| switch (err) {
+        EncodeError.BufferTooSmall => return HandleRequestError.InvalidRequest,
+    };
 }

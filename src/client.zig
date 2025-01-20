@@ -18,8 +18,10 @@ fn handleResponse(buf: []const u8) !void {
         },
     };
 
+    const body = buf[protocol.COMMAND_LEN_BYTES..];
     switch (command) {
-        Command.Get => try handleGetResponse(buf[protocol.COMMAND_LEN_BYTES..]),
+        Command.Get => try handleGetResponse(body),
+        Command.Set => try handleSetResponse(body),
         else => std.log.info("{s}", .{buf}),
     }
 }
@@ -34,6 +36,14 @@ fn handleGetResponse(buf: []const u8) !void {
     }
 
     std.log.info("Get response '{0s}' -> null", .{key.content});
+}
+
+fn handleSetResponse(buf: []const u8) !void {
+    const set_response = try protocol.parseSetResponse(buf);
+    const key = set_response.key;
+    const value = set_response.value;
+
+    std.log.info("Set response '{0s}' = '{1s}'", .{ key.content, value.content });
 }
 
 pub fn main() !void {
