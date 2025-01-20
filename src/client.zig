@@ -23,7 +23,8 @@ fn handleResponse(buf: []const u8) !void {
         Command.Get => try handleGetResponse(body),
         Command.Set => try handleSetResponse(body),
         Command.Delete => try handleDeleteResponse(body),
-        else => std.log.info("{s}", .{buf}),
+        Command.List => try handleListResponse(body),
+        Command.Unknown => std.log.info("{s}", .{buf}),
     }
 }
 
@@ -52,6 +53,21 @@ fn handleDeleteResponse(buf: []const u8) !void {
     const key = delete_response.key;
 
     std.log.info("Deleted '{s}'", .{key.content});
+}
+
+fn handleListResponse(buf: []const u8) !void {
+    const buffer_size = 100;
+    var kv_pairs: [buffer_size]protocol.KeyValuePair = undefined;
+    const list_response = try protocol.parseListResponse(buf, &kv_pairs);
+
+    if (list_response.kv_pairs.len == 0) {
+        std.log.info("no keys", .{});
+        return;
+    }
+
+    for (list_response.kv_pairs) |kv_pair| {
+        std.log.info("'{0s}' = '{1s}'", .{ kv_pair.key.content, kv_pair.value.content });
+    }
 }
 
 pub fn main() !void {

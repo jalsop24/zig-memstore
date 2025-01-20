@@ -164,25 +164,27 @@ fn handleListCommand(conn_state: *ConnState, buf: []const u8, main_mapping: *Mai
 
     std.debug.print("total keys {d}\n", .{keys.len});
 
+    var response_buf: MessageBuffer = undefined;
+    var written: protocol.MessageLen = 0;
+    written += protocol.encodeCommand(Command.List, response_buf[written..]);
+
     if (keys.len == 0) {
-        try writeResponse(conn_state, "no keys");
+        try writeResponse(conn_state, response_buf[0..written]);
         return;
     }
 
-    var response_buf: [1_000]u8 = undefined;
-    var cursor: usize = 0;
+    var pairs = main_mapping.iterator();
+    while (pairs.next()) |entry| {
+        const key = entry.key_ptr.*;
+        const value = entry.value_ptr.*;
 
-    for (main_mapping.keys()) |key| {
         std.debug.print("key: {s}\n", .{key});
-        const value = main_mapping.get(key).?;
-        const slice = std.fmt.bufPrint(response_buf[cursor..], "{s} = {s},", .{ key, value.content }) catch |err|
-            switch (err) {
-            error.NoSpaceLeft => return HandleRequestError.MessageTooLong,
-        };
-        cursor += slice.len;
+
+        written += try encodeString(.{ .content = key }, response_buf[written..]);
+        written += try encodeString(value, response_buf[written..]);
     }
 
-    try writeResponse(conn_state, response_buf[0..cursor]);
+    try writeResponse(conn_state, response_buf[0..written]);
 }
 
 fn encodeString(string: String, buf: []u8) HandleRequestError!protocol.StringLen {

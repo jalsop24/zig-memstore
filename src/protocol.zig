@@ -114,6 +114,42 @@ pub fn parseDeleteResponse(buf: []const u8) !DeleteResponse {
     return .{ .key = key };
 }
 
+pub const KeyValuePair = struct {
+    key: types.String,
+    value: types.String,
+};
+const ListResponse = struct {
+    kv_pairs: []KeyValuePair,
+};
+
+pub fn parseListResponse(buf: []const u8, kv_pairs: []KeyValuePair) !ListResponse {
+    const buffer_size = kv_pairs.len;
+    var cursor: usize = 0;
+    var read: usize = 0;
+
+    while (read < buf.len) {
+        const key = try decodeString(buf[read..]);
+        read += STR_LEN_BYTES + key.content.len;
+        const value = try decodeString(buf[read..]);
+        read += STR_LEN_BYTES + value.content.len;
+
+        if (cursor < buffer_size) {
+            kv_pairs[cursor] = .{
+                .key = key,
+                .value = value,
+            };
+        }
+        cursor += 1;
+    }
+
+    if (cursor > buffer_size) {
+        std.log.debug("More kv pairs available: {d}", .{cursor - buffer_size});
+        cursor = buffer_size;
+    }
+
+    return .{ .kv_pairs = kv_pairs[0..cursor] };
+}
+
 fn commandIs(buf: []const u8, command: []const u8) bool {
     return std.mem.eql(u8, buf, command);
 }
