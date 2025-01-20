@@ -120,3 +120,34 @@ test "simple get req" {
     try std.testing.expectEqualStrings(get_reponse.key.content, "key");
     try std.testing.expectEqual(get_reponse.value, null);
 }
+
+test "set req" {
+    const allocator = std.testing.allocator;
+    var mapping = MainMapping.init(allocator);
+    defer {
+        for (mapping.keys(), mapping.values()) |key, val| {
+            allocator.free(key);
+            val.deinit(allocator);
+        }
+        mapping.deinit();
+    }
+
+    var server = testing.TestServer{
+        .mapping = &mapping,
+    };
+
+    const client = try testing.TestClient.init(allocator);
+    defer client.deinit();
+    client.server = &server;
+
+    const response = try client.sendSetRequest("a 1");
+
+    std.debug.print("response = {x}\n", .{response});
+
+    const command = protocol.decodeCommand(response);
+    try std.testing.expectEqual(command, Command.Set);
+
+    const set_reponse = try protocol.decodeSetResponse(response[protocol.COMMAND_LEN_BYTES..]);
+    try std.testing.expectEqualStrings(set_reponse.key.content, "a");
+    try std.testing.expectEqualStrings(set_reponse.value.content, "1");
+}
