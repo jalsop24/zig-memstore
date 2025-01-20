@@ -29,7 +29,7 @@ fn handleResponse(buf: []const u8) !void {
 }
 
 fn handleGetResponse(buf: []const u8) !void {
-    const get_response = try protocol.parseGetResponse(buf);
+    const get_response = try protocol.decodeGetResponse(buf);
     const key = get_response.key;
 
     if (get_response.value) |value| {
@@ -41,7 +41,7 @@ fn handleGetResponse(buf: []const u8) !void {
 }
 
 fn handleSetResponse(buf: []const u8) !void {
-    const set_response = try protocol.parseSetResponse(buf);
+    const set_response = try protocol.decodeSetResponse(buf);
     const key = set_response.key;
     const value = set_response.value;
 
@@ -49,7 +49,7 @@ fn handleSetResponse(buf: []const u8) !void {
 }
 
 fn handleDeleteResponse(buf: []const u8) !void {
-    const delete_response = try protocol.parseDeleteResponse(buf);
+    const delete_response = try protocol.decodeDeleteResponse(buf);
     const key = delete_response.key;
 
     std.log.info("Deleted '{s}'", .{key.content});
@@ -58,7 +58,7 @@ fn handleDeleteResponse(buf: []const u8) !void {
 fn handleListResponse(buf: []const u8) !void {
     const buffer_size = 100;
     var kv_pairs: [buffer_size]protocol.KeyValuePair = undefined;
-    const list_response = try protocol.parseListResponse(buf, &kv_pairs);
+    const list_response = try protocol.decodeListResponse(buf, &kv_pairs);
 
     if (list_response.kv_pairs.len == 0) {
         std.log.info("no keys", .{});

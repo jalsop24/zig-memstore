@@ -78,7 +78,7 @@ pub const GetResponse = struct {
     value: ?types.String,
 };
 
-pub fn parseGetResponse(buf: []const u8) !GetResponse {
+pub fn decodeGetResponse(buf: []const u8) !GetResponse {
     const key = try decodeString(buf);
     const value: ?types.String = decodeString(buf[STR_LEN_BYTES + key.content.len ..]) catch |err| blk: {
         switch (err) {
@@ -96,7 +96,7 @@ pub const SetResponse = struct {
     value: types.String,
 };
 
-pub fn parseSetResponse(buf: []const u8) !SetResponse {
+pub fn decodeSetResponse(buf: []const u8) !SetResponse {
     const key = try decodeString(buf);
     const value = try decodeString(buf[STR_LEN_BYTES + key.content.len ..]);
     return .{
@@ -109,7 +109,7 @@ const DeleteResponse = struct {
     key: types.String,
 };
 
-pub fn parseDeleteResponse(buf: []const u8) !DeleteResponse {
+pub fn decodeDeleteResponse(buf: []const u8) !DeleteResponse {
     const key = try decodeString(buf);
     return .{ .key = key };
 }
@@ -122,7 +122,7 @@ const ListResponse = struct {
     kv_pairs: []KeyValuePair,
 };
 
-pub fn parseListResponse(buf: []const u8, kv_pairs: []KeyValuePair) !ListResponse {
+pub fn decodeListResponse(buf: []const u8, kv_pairs: []KeyValuePair) !ListResponse {
     const buffer_size = kv_pairs.len;
     var cursor: usize = 0;
     var read: usize = 0;

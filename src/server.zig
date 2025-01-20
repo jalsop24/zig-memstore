@@ -116,7 +116,7 @@ test "simple get req" {
     const command = protocol.decodeCommand(response);
     try std.testing.expectEqual(command, Command.Get);
 
-    const get_reponse = try protocol.parseGetResponse(response[protocol.COMMAND_LEN_BYTES..]);
+    const get_reponse = try protocol.decodeGetResponse(response[protocol.COMMAND_LEN_BYTES..]);
     try std.testing.expectEqualStrings(get_reponse.key.content, "key");
     try std.testing.expectEqual(get_reponse.value, null);
 }
