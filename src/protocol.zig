@@ -105,6 +105,15 @@ pub fn parseSetResponse(buf: []const u8) !SetResponse {
     };
 }
 
+const DeleteResponse = struct {
+    key: types.String,
+};
+
+pub fn parseDeleteResponse(buf: []const u8) !DeleteResponse {
+    const key = try decodeString(buf);
+    return .{ .key = key };
+}
+
 fn commandIs(buf: []const u8, command: []const u8) bool {
     return std.mem.eql(u8, buf, command);
 }

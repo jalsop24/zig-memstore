@@ -22,6 +22,7 @@ fn handleResponse(buf: []const u8) !void {
     switch (command) {
         Command.Get => try handleGetResponse(body),
         Command.Set => try handleSetResponse(body),
+        Command.Delete => try handleDeleteResponse(body),
         else => std.log.info("{s}", .{buf}),
     }
 }
@@ -44,6 +45,13 @@ fn handleSetResponse(buf: []const u8) !void {
     const value = set_response.value;
 
     std.log.info("Set response '{0s}' = '{1s}'", .{ key.content, value.content });
+}
+
+fn handleDeleteResponse(buf: []const u8) !void {
+    const delete_response = try protocol.parseDeleteResponse(buf);
+    const key = delete_response.key;
+
+    std.log.info("Deleted '{s}'", .{key.content});
 }
 
 pub fn main() !void {
