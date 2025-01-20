@@ -181,3 +181,35 @@ test "del req" {
     const delete_reponse = try protocol.decodeDeleteResponse(response[protocol.COMMAND_LEN_BYTES..]);
     try std.testing.expectEqualStrings(delete_reponse.key.content, "a");
 }
+
+test "lst req" {
+    const allocator = std.testing.allocator;
+    var mapping = MainMapping.init(allocator);
+    defer mapping.deinit();
+
+    var server = testing.TestServer{
+        .mapping = &mapping,
+    };
+
+    const client = try testing.TestClient.init(allocator);
+    defer client.deinit();
+    client.server = &server;
+
+    try mapping.put("a", types.String{ .content = "1" });
+
+    const response = try client.sendListRequest("");
+
+    std.debug.print("response = {x}\n", .{response});
+
+    const command = protocol.decodeCommand(response);
+    try std.testing.expectEqual(command, Command.List);
+
+    var buf: [10]protocol.KeyValuePair = undefined;
+    const list_response = try protocol.decodeListResponse(
+        response[protocol.COMMAND_LEN_BYTES..],
+        &buf,
+    );
+    try std.testing.expect(list_response.kv_pairs.len == 1);
+    try std.testing.expectEqualStrings(list_response.kv_pairs[0].key.content, "a");
+    try std.testing.expectEqualStrings(list_response.kv_pairs[0].value.content, "1");
+}
