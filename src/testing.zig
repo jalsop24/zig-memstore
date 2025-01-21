@@ -96,11 +96,11 @@ pub const TestClient = struct {
     }
 
     pub fn sendRequest(self: *TestClient, buf: []const u8) ![]u8 {
-        std.debug.print("send req\n", .{});
+        std.log.debug("send req", .{});
         _ = try self.cs_stream.write(buf);
-        std.debug.print("seek to\n", .{});
+        std.log.debug("seek to", .{});
         try self.cs_stream.seekTo(0);
-        std.debug.print("finish send req\n", .{});
+        std.log.debug("finish send req", .{});
 
         try connectionIo(self.connection(), self.server.mapping);
         return try self.getResponse();
@@ -109,7 +109,7 @@ pub const TestClient = struct {
     pub fn sendGetRequest(self: *TestClient, key: []const u8) ![]u8 {
         var req_buf: [100]u8 = undefined;
         const req_len = try protocol.createGetReq(key, &req_buf);
-        std.debug.print("req_len - {}\n", .{req_len});
+        std.log.debug("req_len - {}", .{req_len});
 
         return try self.sendRequest(req_buf[0..req_len]);
     }
@@ -117,7 +117,7 @@ pub const TestClient = struct {
     pub fn sendSetRequest(self: *TestClient, message: []const u8) ![]u8 {
         var req_buf: [100]u8 = undefined;
         const req_len = try protocol.createSetReq(message, &req_buf);
-        std.debug.print("req_len - {}\n", .{req_len});
+        std.log.debug("req_len - {}", .{req_len});
 
         return try self.sendRequest(req_buf[0..req_len]);
     }
@@ -125,7 +125,7 @@ pub const TestClient = struct {
     pub fn sendDeleteRequest(self: *TestClient, message: []const u8) ![]u8 {
         var req_buf: [100]u8 = undefined;
         const req_len = try protocol.createDelReq(message, &req_buf);
-        std.debug.print("req_len - {}\n", .{req_len});
+        std.log.debug("req_len - {}", .{req_len});
 
         return try self.sendRequest(req_buf[0..req_len]);
     }
@@ -133,7 +133,7 @@ pub const TestClient = struct {
     pub fn sendListRequest(self: *TestClient, message: []const u8) ![]u8 {
         var req_buf: [100]u8 = undefined;
         const req_len = try protocol.createListReq(message, &req_buf);
-        std.debug.print("req_len - {}\n", .{req_len});
+        std.log.debug("req_len - {}", .{req_len});
 
         return try self.sendRequest(req_buf[0..req_len]);
     }
