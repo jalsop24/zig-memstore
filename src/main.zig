@@ -4,7 +4,7 @@ const event_loop = @import("event_loop.zig");
 const Server = @import("server.zig").Server;
 const types = @import("types.zig");
 
-pub const std_options = .{
+pub const std_options: std.Options = .{
     .log_level = .info,
 };
 

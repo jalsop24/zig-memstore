@@ -6,7 +6,7 @@ const cli = @import("cli.zig");
 const LogLevel = std.log.Level;
 const Command = protocol.Command;
 
-pub const std_options = .{
+pub const std_options: std.Options = .{
     .log_level = LogLevel.debug,
 };
 
