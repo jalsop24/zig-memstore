@@ -114,6 +114,30 @@ pub const TestClient = struct {
         return try self.sendRequest(req_buf[0..req_len]);
     }
 
+    pub fn sendSetRequest(self: *TestClient, message: []const u8) ![]u8 {
+        var req_buf: [100]u8 = undefined;
+        const req_len = try protocol.createSetReq(message, &req_buf);
+        std.debug.print("req_len - {}\n", .{req_len});
+
+        return try self.sendRequest(req_buf[0..req_len]);
+    }
+
+    pub fn sendDeleteRequest(self: *TestClient, message: []const u8) ![]u8 {
+        var req_buf: [100]u8 = undefined;
+        const req_len = try protocol.createDelReq(message, &req_buf);
+        std.debug.print("req_len - {}\n", .{req_len});
+
+        return try self.sendRequest(req_buf[0..req_len]);
+    }
+
+    pub fn sendListRequest(self: *TestClient, message: []const u8) ![]u8 {
+        var req_buf: [100]u8 = undefined;
+        const req_len = try protocol.createListReq(message, &req_buf);
+        std.debug.print("req_len - {}\n", .{req_len});
+
+        return try self.sendRequest(req_buf[0..req_len]);
+    }
+
     fn getResponse(self: *TestClient) ![]u8 {
         try self.sc_stream.seekTo(0);
         const response_len = try protocol.receiveMessage(

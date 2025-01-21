@@ -1,25 +1,21 @@
 const std = @import("std");
 const NetConn = @import("NetConn.zig");
 
-pub const MainMapping = std.StringArrayHashMap(*String);
+pub const MainMapping = std.StringArrayHashMap(String);
 pub const ConnMapping = std.AutoArrayHashMap(std.posix.socket_t, *NetConn);
 
 pub const String = struct {
-    content: []u8,
+    content: []const u8,
 
-    pub fn init(allocator: std.mem.Allocator, content: []const u8) !*String {
-        var new = try allocator.create(String);
-        errdefer allocator.destroy(new);
+    pub fn init(allocator: std.mem.Allocator, content: []const u8) !String {
+        const bytes: []u8 = try allocator.alloc(u8, content.len);
+        errdefer allocator.free(bytes);
 
-        const bytes = try allocator.alloc(u8, content.len);
-        new.content = bytes;
-
-        @memcpy(new.content, content);
-        return new;
+        @memcpy(bytes, content);
+        return .{ .content = bytes };
     }
 
-    pub fn deinit(self: *String, allocator: std.mem.Allocator) void {
+    pub fn deinit(self: *const String, allocator: std.mem.Allocator) void {
         allocator.free(self.content);
-        allocator.destroy(self);
     }
 };

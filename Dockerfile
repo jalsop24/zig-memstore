@@ -3,17 +3,17 @@ WORKDIR /app
 
 CMD ["bash"]
 
-RUN curl -sS https://ziglang.org/download/0.13.0/zig-linux-aarch64-0.13.0.tar.xz > archive.tar.xz \
+RUN curl -sS https://ziglang.org/builds/zig-linux-aarch64-0.14.0-dev.2850+0ead0beb8.tar.xz > archive.tar.xz \
     && ls -al /app \
     && tar -xf archive.tar.xz \
     && rm archive.tar.xz
 
-ENV PATH=/app/zig-linux-aarch64-0.13.0:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+ENV PATH=/app/zig-linux-aarch64-0.14.0-dev.2850+0ead0beb8:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
 COPY /src /app/src
 COPY build.zig /app/build.zig
 
-RUN zig build
+RUN zig build -freference-trace=10
 
 FROM ubuntu
 WORKDIR /app

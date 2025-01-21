@@ -13,6 +13,8 @@ const NetConn = @import("NetConn.zig");
 const MainMapping = types.MainMapping;
 const ConnMapping = types.ConnMapping;
 
+const Command = protocol.Command;
+
 pub const Server = struct {
     handle: std.posix.socket_t,
     mapping: *MainMapping,
@@ -109,6 +111,107 @@ test "simple get req" {
 
     const response = try client.sendGetRequest("key");
 
-    // TODO: Parse response properly as it contains length header
-    try std.testing.expectEqualStrings("get key -> null", response);
+    std.debug.print("response = {x}\n", .{response});
+
+    const command = protocol.decodeCommand(response);
+    try std.testing.expectEqual(command, Command.Get);
+
+    const get_reponse = try protocol.decodeGetResponse(response[protocol.COMMAND_LEN_BYTES..]);
+    try std.testing.expectEqualStrings(get_reponse.key.content, "key");
+    try std.testing.expectEqual(get_reponse.value, null);
+}
+
+test "set req" {
+    const allocator = std.testing.allocator;
+    var mapping = MainMapping.init(allocator);
+    defer {
+        for (mapping.keys(), mapping.values()) |key, val| {
+            allocator.free(key);
+            val.deinit(allocator);
+        }
+        mapping.deinit();
+    }
+
+    var server = testing.TestServer{
+        .mapping = &mapping,
+    };
+
+    const client = try testing.TestClient.init(allocator);
+    defer client.deinit();
+    client.server = &server;
+
+    const response = try client.sendSetRequest("a 1");
+
+    std.debug.print("response = {x}\n", .{response});
+
+    const command = protocol.decodeCommand(response);
+    try std.testing.expectEqual(command, Command.Set);
+
+    const set_reponse = try protocol.decodeSetResponse(response[protocol.COMMAND_LEN_BYTES..]);
+    try std.testing.expectEqualStrings(set_reponse.key.content, "a");
+    try std.testing.expectEqualStrings(set_reponse.value.content, "1");
+}
+
+test "del req" {
+    const allocator = std.testing.allocator;
+    var mapping = MainMapping.init(allocator);
+    defer {
+        for (mapping.keys(), mapping.values()) |key, val| {
+            allocator.free(key);
+            val.deinit(allocator);
+        }
+        mapping.deinit();
+    }
+
+    var server = testing.TestServer{
+        .mapping = &mapping,
+    };
+
+    const client = try testing.TestClient.init(allocator);
+    defer client.deinit();
+    client.server = &server;
+
+    const response = try client.sendDeleteRequest("a");
+
+    std.debug.print("response = {x}\n", .{response});
+
+    const command = protocol.decodeCommand(response);
+    try std.testing.expectEqual(command, Command.Delete);
+
+    const delete_reponse = try protocol.decodeDeleteResponse(response[protocol.COMMAND_LEN_BYTES..]);
+    try std.testing.expectEqualStrings(delete_reponse.key.content, "a");
+}
+
+test "lst req" {
+    const allocator = std.testing.allocator;
+    var mapping = MainMapping.init(allocator);
+    defer mapping.deinit();
+
+    var server = testing.TestServer{
+        .mapping = &mapping,
+    };
+
+    const client = try testing.TestClient.init(allocator);
+    defer client.deinit();
+    client.server = &server;
+
+    try mapping.put("a", types.String{ .content = "1" });
+
+    const response = try client.sendListRequest("");
+
+    std.debug.print("list response = {x}\n", .{response});
+
+    const command = protocol.decodeCommand(response);
+    try std.testing.expectEqual(command, Command.List);
+
+    var buf: [10]protocol.KeyValuePair = undefined;
+    const list_response = try protocol.decodeListResponse(
+        response[protocol.COMMAND_LEN_BYTES..],
+        &buf,
+    );
+    try std.testing.expect(list_response.len == 1);
+    var iter = list_response.iterator();
+    const kv_pair = iter.next().?;
+    try std.testing.expectEqualStrings(kv_pair.key.content, "a");
+    try std.testing.expectEqualStrings(kv_pair.value.content, "1");
 }
