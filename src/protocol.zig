@@ -91,6 +91,16 @@ pub fn decodeGetResponse(buf: []const u8) !GetResponse {
     };
 }
 
+pub fn encodeGetResponse(get_response: GetResponse, buf: []u8) EncodeError!MessageLen {
+    var written: MessageLen = 0;
+    written += encodeCommand(Command.Get, buf[written..]);
+    written += try encodeString(get_response.key, buf[written..]);
+    if (get_response.value) |value_string| {
+        written += try encodeString(value_string, buf[written..]);
+    }
+    return written;
+}
+
 pub const SetResponse = struct {
     key: types.String,
     value: types.String,
@@ -105,6 +115,18 @@ pub fn decodeSetResponse(buf: []const u8) !SetResponse {
     };
 }
 
+pub fn encodeSetResponse(
+    set_response: SetResponse,
+    buf: []u8,
+) EncodeError!MessageLen {
+    var written: MessageLen = 0;
+    written += encodeCommand(Command.Set, buf[written..]);
+    written += try encodeString(set_response.key, buf[written..]);
+    written += try encodeString(set_response.value, buf[written..]);
+
+    return written;
+}
+
 const DeleteResponse = struct {
     key: types.String,
 };
@@ -114,12 +136,60 @@ pub fn decodeDeleteResponse(buf: []const u8) !DeleteResponse {
     return .{ .key = key };
 }
 
+pub fn encodeDeleteResponse(delete_response: DeleteResponse, response_buf: []u8) EncodeError!MessageLen {
+    var written: MessageLen = 0;
+    written += encodeCommand(Command.Delete, response_buf[written..]);
+    written += try encodeString(delete_response.key, response_buf[written..]);
+    return written;
+}
+
 pub const KeyValuePair = struct {
     key: types.String,
     value: types.String,
 };
 const ListResponse = struct {
-    kv_pairs: []KeyValuePair,
+    len: usize = 0,
+    kv_pairs: ?[]KeyValuePair = null,
+    mapping: ?*const types.MainMapping = null,
+
+    pub const Iterator = struct {
+        index: usize,
+        iter: ?types.MainMapping.Iterator = null,
+        kv_pairs: ?[]KeyValuePair = null,
+
+        pub fn next(self: *Iterator) ?KeyValuePair {
+            if (self.iter) |*iter| {
+                const entry = iter.next();
+                if (entry == null) return null;
+
+                return .{
+                    .key = .{ .content = entry.?.key_ptr.* },
+                    .value = entry.?.value_ptr.*,
+                };
+            }
+
+            const kv_pairs = self.kv_pairs.?;
+            if (self.index >= kv_pairs.len) return null;
+
+            const result = kv_pairs[self.index];
+            self.index += 1;
+            return result;
+        }
+    };
+
+    pub fn iterator(self: *const ListResponse) Iterator {
+        if (self.mapping) |mapping| {
+            return .{
+                .index = 0,
+                .iter = mapping.iterator(),
+            };
+        }
+
+        return .{
+            .index = 0,
+            .kv_pairs = self.kv_pairs,
+        };
+    }
 };
 
 pub fn decodeListResponse(buf: []const u8, kv_pairs: []KeyValuePair) !ListResponse {
@@ -147,7 +217,29 @@ pub fn decodeListResponse(buf: []const u8, kv_pairs: []KeyValuePair) !ListRespon
         cursor = buffer_size;
     }
 
-    return .{ .kv_pairs = kv_pairs[0..cursor] };
+    return .{ .kv_pairs = kv_pairs[0..cursor], .len = cursor };
+}
+
+pub fn encodeListReponse(list_response: ListResponse, response_buf: []u8) EncodeError!MessageLen {
+    var written: MessageLen = 0;
+    written += encodeCommand(Command.List, response_buf[written..]);
+
+    if (list_response.len == 0) {
+        return 0;
+    }
+
+    var iterator = list_response.iterator();
+    while (iterator.next()) |kv_pair| {
+        const key = kv_pair.key;
+        const value = kv_pair.value;
+
+        std.debug.print("key: {s}\n", .{key.content});
+
+        written += try encodeString(key, response_buf[written..]);
+        written += try encodeString(value, response_buf[written..]);
+    }
+
+    return written;
 }
 
 fn commandIs(buf: []const u8, command: []const u8) bool {

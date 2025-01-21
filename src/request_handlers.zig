@@ -75,15 +75,14 @@ fn handleGetCommand(conn_state: *ConnState, buf: []u8, main_mapping: *MainMappin
     const value = main_mapping.get(key.content);
 
     var response_buf: MessageBuffer = undefined;
-    var written: protocol.MessageLen = 0;
-    written += protocol.encodeCommand(Command.Get, response_buf[written..]);
-    written += try encodeString(key, response_buf[written..]);
-    if (value) |value_string| {
-        written += try encodeString(value_string, response_buf[written..]);
-    }
+    const written: protocol.MessageLen = protocol.encodeGetResponse(.{
+        .key = key,
+        .value = value,
+    }, &response_buf) catch |err| switch (err) {
+        EncodeError.BufferTooSmall => return HandleRequestError.InvalidRequest,
+    };
 
-    const response = response_buf[0..written];
-    try writeResponse(conn_state, response);
+    try writeResponse(conn_state, response_buf[0..written]);
 }
 
 fn handleSetCommand(conn_state: *ConnState, buf: []u8, main_mapping: *MainMapping) HandleRequestError!void {
@@ -125,10 +124,12 @@ fn handleSetCommand(conn_state: *ConnState, buf: []u8, main_mapping: *MainMappin
     };
 
     var response_buf: MessageBuffer = undefined;
-    var written: protocol.MessageLen = 0;
-    written += protocol.encodeCommand(Command.Set, response_buf[written..]);
-    written += try encodeString(key, response_buf[written..]);
-    written += try encodeString(value, response_buf[written..]);
+    const written: protocol.MessageLen = protocol.encodeSetResponse(.{
+        .key = key,
+        .value = value,
+    }, &response_buf) catch |err| switch (err) {
+        EncodeError.BufferTooSmall => return HandleRequestError.InvalidRequest,
+    };
 
     try writeResponse(conn_state, response_buf[0..written]);
 }
@@ -148,41 +149,28 @@ fn handleDeleteCommand(conn_state: *ConnState, buf: []const u8, main_mapping: *M
     _ = main_mapping.swapRemove(key.content);
 
     var response_buf: MessageBuffer = undefined;
-    var response_len: protocol.MessageLen = 0;
-    response_len += protocol.encodeCommand(Command.Delete, response_buf[response_len..]);
-    response_len += protocol.encodeString(key, response_buf[response_len..]) catch |err| switch (err) {
+    const written = protocol.encodeDeleteResponse(.{
+        .key = key,
+    }, &response_buf) catch |err| switch (err) {
         EncodeError.BufferTooSmall => return HandleRequestError.InvalidRequest,
     };
 
-    try writeResponse(conn_state, response_buf[0..response_len]);
+    try writeResponse(conn_state, response_buf[0..written]);
 }
 
 fn handleListCommand(conn_state: *ConnState, buf: []const u8, main_mapping: *MainMapping) HandleRequestError!void {
     std.log.info("List command '{0s}' (0x)", .{buf});
 
-    const keys = main_mapping.keys();
-
-    std.debug.print("total keys {d}\n", .{keys.len});
-
     var response_buf: MessageBuffer = undefined;
-    var written: protocol.MessageLen = 0;
-    written += protocol.encodeCommand(Command.List, response_buf[written..]);
-
-    if (keys.len == 0) {
-        try writeResponse(conn_state, response_buf[0..written]);
-        return;
-    }
-
-    var pairs = main_mapping.iterator();
-    while (pairs.next()) |entry| {
-        const key = entry.key_ptr.*;
-        const value = entry.value_ptr.*;
-
-        std.debug.print("key: {s}\n", .{key});
-
-        written += try encodeString(.{ .content = key }, response_buf[written..]);
-        written += try encodeString(value, response_buf[written..]);
-    }
+    const written = protocol.encodeListReponse(
+        .{
+            .mapping = main_mapping,
+            .len = main_mapping.keys().len,
+        },
+        &response_buf,
+    ) catch |err| switch (err) {
+        EncodeError.BufferTooSmall => return HandleRequestError.InvalidRequest,
+    };
 
     try writeResponse(conn_state, response_buf[0..written]);
 }

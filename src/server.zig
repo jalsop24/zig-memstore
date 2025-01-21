@@ -199,7 +199,7 @@ test "lst req" {
 
     const response = try client.sendListRequest("");
 
-    std.debug.print("response = {x}\n", .{response});
+    std.debug.print("list response = {x}\n", .{response});
 
     const command = protocol.decodeCommand(response);
     try std.testing.expectEqual(command, Command.List);
@@ -209,7 +209,9 @@ test "lst req" {
         response[protocol.COMMAND_LEN_BYTES..],
         &buf,
     );
-    try std.testing.expect(list_response.kv_pairs.len == 1);
-    try std.testing.expectEqualStrings(list_response.kv_pairs[0].key.content, "a");
-    try std.testing.expectEqualStrings(list_response.kv_pairs[0].value.content, "1");
+    try std.testing.expect(list_response.len == 1);
+    var iter = list_response.iterator();
+    const kv_pair = iter.next().?;
+    try std.testing.expectEqualStrings(kv_pair.key.content, "a");
+    try std.testing.expectEqualStrings(kv_pair.value.content, "1");
 }

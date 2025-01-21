@@ -60,12 +60,13 @@ fn handleListResponse(buf: []const u8) !void {
     var kv_pairs: [buffer_size]protocol.KeyValuePair = undefined;
     const list_response = try protocol.decodeListResponse(buf, &kv_pairs);
 
-    if (list_response.kv_pairs.len == 0) {
+    if (list_response.len == 0) {
         std.log.info("no keys", .{});
         return;
     }
 
-    for (list_response.kv_pairs) |kv_pair| {
+    var iter = list_response.iterator();
+    while (iter.next()) |kv_pair| {
         std.log.info("'{0s}' = '{1s}'", .{ kv_pair.key.content, kv_pair.value.content });
     }
 }
