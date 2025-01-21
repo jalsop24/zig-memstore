@@ -1,6 +1,6 @@
 
 RUN := docker compose run --rm --remove-orphans --build
-TEST := zig test ./src/server.zig 
+TEST := zig build test --summary all
 
 test:
 	${RUN} --entrypoint="${TEST}" shell
