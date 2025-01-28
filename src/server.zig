@@ -43,12 +43,12 @@ pub const Server = struct {
         event: *const event_loop.Event,
         epoll_loop: *event_loop.EpollEventLoop,
     ) !void {
-        std.log.debug("Handling event {}\n", .{event});
-        std.log.debug("fd - {}\n", .{event.data.fd});
+        std.log.debug("Handling event {}", .{event});
+        std.log.debug("fd - {}", .{event.data.fd});
 
         if (event.data.fd == self.handle) {
             // Handle server fd
-            std.log.debug("accept new connection\n", .{});
+            std.log.debug("accept new connection", .{});
             const client_fd = try self.acceptNewConnection();
             try epoll_loop.register_client_event(client_fd);
             return;
@@ -59,7 +59,7 @@ pub const Server = struct {
         try connectionIo(conn.connection(), self.mapping);
 
         if (conn.state.state == .END) {
-            std.log.info("Remove connection (fd={})\n", .{conn.stream.handle});
+            std.log.info("Remove connection (fd={})", .{conn.stream.handle});
             conn.connection().close();
             _ = self.conn_mapping.swapRemove(event.data.fd);
             conn.deinit(self.conn_mapping.allocator);
@@ -111,7 +111,7 @@ test "simple get req" {
 
     const response = try client.sendGetRequest("key");
 
-    std.debug.print("response = {x}\n", .{response});
+    std.log.debug("response = {x}", .{response});
 
     const command = protocol.decodeCommand(response);
     try std.testing.expectEqual(command, Command.Get);
@@ -142,7 +142,7 @@ test "set req" {
 
     const response = try client.sendSetRequest("a 1");
 
-    std.debug.print("response = {x}\n", .{response});
+    std.log.debug("response = {x}", .{response});
 
     const command = protocol.decodeCommand(response);
     try std.testing.expectEqual(command, Command.Set);
@@ -173,7 +173,7 @@ test "del req" {
 
     const response = try client.sendDeleteRequest("a");
 
-    std.debug.print("response = {x}\n", .{response});
+    std.log.debug("response = {x}", .{response});
 
     const command = protocol.decodeCommand(response);
     try std.testing.expectEqual(command, Command.Delete);
@@ -199,7 +199,7 @@ test "lst req" {
 
     const response = try client.sendListRequest("");
 
-    std.debug.print("list response = {x}\n", .{response});
+    std.log.debug("list response = {x}", .{response});
 
     const command = protocol.decodeCommand(response);
     try std.testing.expectEqual(command, Command.List);

@@ -21,7 +21,7 @@ fn stateRes(conn: GenericConn) void {
 }
 
 fn tryFlushBuffer(conn: GenericConn) bool {
-    std.log.debug("Try flush buffer\n", .{});
+    std.log.debug("Try flush buffer", .{});
     var conn_state = conn.state;
 
     _ = conn.write(conn_state.written_slice()) catch |err|
@@ -46,7 +46,7 @@ fn stateReq(conn: GenericConn, main_mapping: *MainMapping) void {
 
 fn tryFillBuffer(conn: GenericConn, main_mapping: *MainMapping) bool {
     // Reset buffer so that it is filled right from the start
-    std.debug.print("Try fill buffer\n", .{});
+    std.log.debug("Try fill buffer", .{});
 
     var conn_state = conn.state;
     std.mem.copyForwards(
@@ -56,7 +56,7 @@ fn tryFillBuffer(conn: GenericConn, main_mapping: *MainMapping) bool {
     );
     conn_state.rbuf_cursor = 0;
 
-    std.debug.print("Read connection\n", .{});
+    std.log.debug("Read connection", .{});
     const num_read = conn.read(conn_state.rbuf[conn_state.rbuf_size..]) catch |err|
         switch (err) {
         // WouldBlock corresponds to EAGAIN signal

@@ -233,7 +233,7 @@ pub fn encodeListReponse(list_response: ListResponse, response_buf: []u8) Encode
         const key = kv_pair.key;
         const value = kv_pair.value;
 
-        std.debug.print("key: {s}\n", .{key.content});
+        std.log.debug("key: {s}", .{key.content});
 
         written += try encodeString(key, response_buf[written..]);
         written += try encodeString(value, response_buf[written..]);

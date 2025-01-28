@@ -11,7 +11,7 @@ pub const std_options: std.Options = .{
 // Function to manage CTRL + C
 fn sigintHandler(sig: c_int) callconv(.C) void {
     _ = sig;
-    std.debug.print("\nSIGINT received\n", .{});
+    std.log.debug("\nSIGINT received", .{});
     std.debug.panic("sigint panic", .{});
 }
 
@@ -72,6 +72,6 @@ pub fn main() !void {
         .mapping = &main_mapping,
     };
 
-    std.log.debug("Server fd {}\n", .{server.handle});
+    std.log.debug("Server fd {}", .{server.handle});
     try server.run();
 }
