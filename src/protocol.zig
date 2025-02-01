@@ -224,10 +224,6 @@ pub fn encodeListReponse(list_response: ListResponse, response_buf: []u8) Encode
     var written: MessageLen = 0;
     written += encodeCommand(Command.List, response_buf[written..]);
 
-    if (list_response.len == 0) {
-        return 0;
-    }
-
     var iterator = list_response.iterator();
     while (iterator.next()) |kv_pair| {
         const key = kv_pair.key;

@@ -194,7 +194,26 @@ test "lst req" {
     const client = try testing.TestClient.init(allocator);
     defer client.deinit();
     client.server = &server;
+    {
+        const response = try client.sendListRequest("");
 
+        std.log.debug("list response = {x}", .{response});
+
+        const command = protocol.decodeCommand(response);
+        try std.testing.expectEqual(command, Command.List);
+
+        var buf: [10]protocol.KeyValuePair = undefined;
+        const list_response = try protocol.decodeListResponse(
+            response[protocol.COMMAND_LEN_BYTES..],
+            &buf,
+        );
+        try std.testing.expect(list_response.len == 0);
+        var iter = list_response.iterator();
+        const kv_pair = iter.next();
+        try std.testing.expect(kv_pair == null);
+    }
+
+    // Insert actual data into the mapping
     try mapping.put("a", types.String{ .content = "1" });
 
     const response = try client.sendListRequest("");
