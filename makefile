@@ -1,5 +1,5 @@
 
-RUN := docker compose run --rm --remove-orphans --build
+RUN := docker compose run --rm --remove-orphans --build -v "$(shell pwd)/.zig-cache:/app/.zig-cache/"
 TEST := zig build test --summary all
 
 test:
