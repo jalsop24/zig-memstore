@@ -87,3 +87,111 @@ test "linked list length" {
 
     try std.testing.expectError(error.CircularReference, list_size(&b));
 }
+
+pub const HashNode = struct {
+    next: ?*HashNode = null,
+    hash_code: HashTable.HashType = 0,
+};
+
+const HashTable = struct {
+    alloc: std.mem.Allocator,
+    slots: []?*HashNode,
+    mask: HashType,
+    size: u32,
+
+    const HashType = u32;
+
+    pub fn init(alloc: std.mem.Allocator, n_slots: u32) !HashTable {
+        std.debug.assert(n_slots % 2 == 0);
+        const slots = try alloc.alloc(?*HashNode, n_slots);
+        for (0..n_slots) |i| {
+            slots[i] = null;
+        }
+        const mask = n_slots - 1;
+        return .{
+            .alloc = alloc,
+            .slots = slots,
+            .mask = mask,
+            .size = 0,
+        };
+    }
+
+    pub fn deinit(self: HashTable) void {
+        self.alloc.free(self.slots);
+    }
+
+    inline fn hash(self: *HashTable, value: HashType) HashType {
+        return self.mask & value;
+    }
+
+    pub fn insert_node(self: *HashTable, node: *HashNode) void {
+        const pos = self.hash(node.hash_code);
+
+        node.next = self.slots[pos];
+        self.slots[pos] = node;
+        self.size += 1;
+    }
+
+    pub fn lookup_node(self: *HashTable, node: *HashNode, eq: fn (*HashNode, *HashNode) bool) ?*HashNode {
+        const parent = self.lookup_parent(node, eq);
+        return parent.*;
+    }
+
+    pub fn remove_node(self: *HashTable, node: *HashNode, eq: fn (*HashNode, *HashNode) bool) void {
+        const from = self.lookup_parent(node, eq);
+        const target = from.*;
+        if (target == null) {
+            return;
+        }
+
+        from.* = target.?.next;
+        self.size -= 1;
+    }
+
+    fn lookup_parent(self: *HashTable, node: *HashNode, eq: fn (*HashNode, *HashNode) bool) *?*HashNode {
+        const pos = self.hash(node.hash_code);
+
+        var from_node = &self.slots[pos];
+        while (from_node.*) |current_node| {
+            if (current_node.hash_code == node.hash_code and eq(current_node, node)) {
+                break;
+            }
+            from_node = &current_node.next;
+        }
+
+        return from_node;
+    }
+};
+
+fn test_eq(a: *HashNode, b: *HashNode) bool {
+    return a.hash_code == b.hash_code;
+}
+
+test "hashtable" {
+    const alloc = std.testing.allocator;
+
+    const slots = 16;
+    var hash_table = try HashTable.init(alloc, slots);
+    defer hash_table.deinit();
+
+    var node: HashNode = .{};
+    hash_table.insert_node(&node);
+    try std.testing.expect(hash_table.size == 1);
+
+    const found = hash_table.lookup_node(&node, test_eq);
+    try std.testing.expect(found.? == &node);
+
+    var node_b: HashNode = .{ .hash_code = slots };
+    hash_table.insert_node(&node_b);
+    try std.testing.expect(hash_table.size == 2);
+
+    const found_a = hash_table.lookup_node(&node, test_eq);
+    const found_b = hash_table.lookup_node(&node_b, test_eq);
+
+    try std.testing.expect(found_a.? == &node);
+    try std.testing.expect(found_b.? == &node_b);
+
+    hash_table.remove_node(&node, test_eq);
+    try std.testing.expect(hash_table.lookup_node(&node, test_eq) == null);
+    try std.testing.expect(hash_table.size == 1);
+}
