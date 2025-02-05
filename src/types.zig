@@ -88,9 +88,15 @@ test "linked list length" {
     try std.testing.expectError(error.CircularReference, list_size(&b));
 }
 
-pub const HashNode = struct {
+const Entry = struct {
+    key: String,
+    value: String,
+    node: HashNode,
+};
+
+const HashNode = struct {
     next: ?*HashNode = null,
-    hash_code: HashTable.HashType = 0,
+    hash_code: HashTable.HashType,
 };
 
 const HashTable = struct {
@@ -100,8 +106,34 @@ const HashTable = struct {
     size: u32,
     eq: EqFunc,
 
+    const Self = @This();
+
     const HashType = u32;
-    const EqFunc = *const fn (*HashNode, *HashNode) bool;
+    const EqFunc = *const fn (*const HashNode, *const HashNode) bool;
+
+    const Iterator = struct {
+        pos: u32,
+        current_node: ?*HashNode,
+        h_table: *const HashTable,
+
+        pub fn next(self: *Iterator) ?*Entry {
+            if (self.current_node) |node| {
+                self.current_node = node.next;
+                return container(HashNode).of(node, Entry, "node");
+            }
+
+            const start = self.pos;
+            for (start.., self.h_table.slots[start..]) |i, node| {
+                if (node) |head| {
+                    self.pos = @intCast(i + 1);
+                    self.current_node = head.next;
+                    return container(HashNode).of(head, Entry, "node");
+                }
+            }
+
+            return null;
+        }
+    };
 
     pub fn init(alloc: std.mem.Allocator, n_slots: u32, eq: EqFunc) !HashTable {
         std.debug.assert(n_slots % 2 == 0);
@@ -119,15 +151,48 @@ const HashTable = struct {
         };
     }
 
-    pub fn deinit(self: HashTable) void {
+    pub fn deinit(self: Self) void {
+        var iter = self.entries();
+        while (iter.next()) |entry| {
+            self.alloc.destroy(entry);
+        }
         self.alloc.free(self.slots);
     }
 
-    inline fn hash(self: *HashTable, value: HashType) HashType {
+    pub fn put(self: *Self, key: String, value: String) !void {
+        const existing_node = self.lookup_node(&.{
+            .hash_code = string_hash(key),
+        });
+
+        if (existing_node) |node| {
+            var entry = container(HashNode).of(node, Entry, "node");
+            entry.value = value;
+            return;
+        }
+
+        const new_entry = try self.alloc.create(Entry);
+        new_entry.* = .{
+            .key = key,
+            .value = value,
+            .node = .{ .hash_code = string_hash(key) },
+        };
+
+        self.insert_node(&new_entry.node);
+    }
+
+    pub fn entries(self: *const Self) Iterator {
+        return .{
+            .h_table = self,
+            .pos = 0,
+            .current_node = null,
+        };
+    }
+
+    inline fn hash(self: *Self, value: HashType) HashType {
         return self.mask & value;
     }
 
-    pub fn insert_node(self: *HashTable, node: *HashNode) void {
+    pub fn insert_node(self: *Self, node: *HashNode) void {
         const pos = self.hash(node.hash_code);
 
         node.next = self.slots[pos];
@@ -135,12 +200,12 @@ const HashTable = struct {
         self.size += 1;
     }
 
-    pub fn lookup_node(self: *HashTable, node: *HashNode) ?*HashNode {
+    pub fn lookup_node(self: *Self, node: *const HashNode) ?*HashNode {
         const parent = self.lookup_parent(node);
         return parent.*;
     }
 
-    pub fn remove_node(self: *HashTable, node: *HashNode) void {
+    pub fn remove_node(self: *Self, node: *HashNode) void {
         const from = self.lookup_parent(node);
         const target = from.*;
         if (target == null) {
@@ -151,7 +216,7 @@ const HashTable = struct {
         self.size -= 1;
     }
 
-    fn lookup_parent(self: *HashTable, node: *HashNode) *?*HashNode {
+    fn lookup_parent(self: *Self, node: *const HashNode) *?*HashNode {
         const pos = self.hash(node.hash_code);
 
         var from_node = &self.slots[pos];
@@ -166,8 +231,20 @@ const HashTable = struct {
     }
 };
 
-fn test_eq(a: *HashNode, b: *HashNode) bool {
+fn string_hash(string: String) HashTable.HashType {
+    var out_buf: [16]u8 = undefined;
+    std.crypto.hash.Md5.hash(string.content, &out_buf, .{});
+    return std.mem.readPackedInt(HashTable.HashType, out_buf[0..4], 0, .little);
+}
+
+fn test_eq(a: *const HashNode, b: *const HashNode) bool {
     return a.hash_code == b.hash_code;
+}
+
+fn string_eq(a: *const HashNode, b: *const HashNode) bool {
+    const entry_a = container(HashNode).of(a, Entry, "node");
+    const entry_b = container(HashNode).of(b, Entry, "node");
+    return std.mem.eql(u8, entry_a.key.content, entry_b.key.content);
 }
 
 test "hashtable" {
@@ -177,7 +254,7 @@ test "hashtable" {
     var hash_table = try HashTable.init(alloc, slots, &test_eq);
     defer hash_table.deinit();
 
-    var node: HashNode = .{};
+    var node: HashNode = .{ .hash_code = 0 };
     hash_table.insert_node(&node);
     try std.testing.expect(hash_table.size == 1);
 
@@ -197,4 +274,26 @@ test "hashtable" {
     hash_table.remove_node(&node);
     try std.testing.expect(hash_table.lookup_node(&node) == null);
     try std.testing.expect(hash_table.size == 1);
+}
+
+test "hashtable put" {
+    const alloc = std.testing.allocator;
+
+    const slots = 16;
+    var hash_table = try HashTable.init(alloc, slots, &string_eq);
+    defer hash_table.deinit();
+
+    const key: String = .{ .content = "a" };
+    const value: String = .{ .content = "b" };
+    try hash_table.put(key, value);
+
+    try std.testing.expect(hash_table.size == 1);
+
+    var iter = hash_table.entries();
+    var count: u32 = 0;
+    while (iter.next() != null) {
+        count += 1;
+    }
+
+    try std.testing.expect(count == 1);
 }
