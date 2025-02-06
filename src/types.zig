@@ -20,72 +20,38 @@ pub const String = struct {
     }
 };
 
-pub const Integer = struct {
-    content: u64,
-    node: Node,
-};
-
-pub const Node = struct {
-    next: ?*Node = null,
-};
-
-pub fn list_size(root_node: *const Node) !usize {
-    var current_node: ?*Node = @constCast(root_node);
-    var len: usize = 0;
-
-    while (current_node) |node| {
-        current_node = node.next;
-        len += 1;
-        if (current_node == root_node) {
-            return error.CircularReference;
-        }
-    }
-
-    return len;
-}
-
-pub fn container(comptime V: type) type {
-    return struct {
-        pub fn of(
-            node: *const V,
-            comptime T: type,
-            comptime field_name: []const u8,
-        ) *T {
-            const offset = @offsetOf(T, field_name);
-            const raw_node_ptr: [*]u8 = @ptrCast(@constCast(node));
-            const ptr: *T = @alignCast(@ptrCast(raw_node_ptr - offset));
-            return ptr;
-        }
-    };
+/// For use with intrusive data structures. `node` must be embedded within an instance of the type `T`
+pub fn container_of(
+    node: anytype,
+    comptime T: type,
+    comptime field_name: []const u8,
+) *T {
+    const offset = @offsetOf(T, field_name);
+    const raw_node_ptr: [*]u8 = @ptrCast(@constCast(node));
+    const ptr: *T = @alignCast(@ptrCast(raw_node_ptr - offset));
+    return ptr;
 }
 
 test "data from node" {
-    const int = Integer{
-        .content = 123,
+    const TestNode = struct {
+        _: u8 = undefined,
+    };
+
+    const Container = struct {
+        node: TestNode,
+    };
+
+    const container = Container{
         .node = .{},
     };
 
-    const ptr = container(Node).of(
-        &int.node,
-        Integer,
+    const ptr = container_of(
+        &container.node,
+        Container,
         "node",
     );
 
-    try std.testing.expectEqual(ptr, &int);
-    try std.testing.expectEqual(int.node.next, null);
-}
-
-test "linked list length" {
-    var a = Node{};
-    var b = Node{
-        .next = &a,
-    };
-
-    try std.testing.expectEqual(2, list_size(&b));
-
-    a.next = &b;
-
-    try std.testing.expectError(error.CircularReference, list_size(&b));
+    try std.testing.expectEqual(ptr, &container);
 }
 
 const Entry = struct {
@@ -97,6 +63,12 @@ const Entry = struct {
 const HashNode = struct {
     next: ?*HashNode = null,
     hash_code: HashTable.HashType,
+
+    pub inline fn entry(
+        self: *const HashNode,
+    ) *Entry {
+        return container_of(self, Entry, "node");
+    }
 };
 
 const HashTable = struct {
@@ -119,7 +91,7 @@ const HashTable = struct {
         pub fn next(self: *Iterator) ?*Entry {
             if (self.current_node) |node| {
                 self.current_node = node.next;
-                return container(HashNode).of(node, Entry, "node");
+                return node.entry();
             }
 
             const start = self.pos;
@@ -127,7 +99,7 @@ const HashTable = struct {
                 if (node) |head| {
                     self.pos = @intCast(i + 1);
                     self.current_node = head.next;
-                    return container(HashNode).of(head, Entry, "node");
+                    return head.entry();
                 }
             }
 
@@ -165,7 +137,7 @@ const HashTable = struct {
         });
 
         if (existing_node) |node| {
-            var entry = container(HashNode).of(node, Entry, "node");
+            var entry = node.entry();
             entry.value = value;
             return;
         }
@@ -189,7 +161,7 @@ const HashTable = struct {
         const node = self.lookup_node(&dummy_entry.node);
 
         if (node) |found_node| {
-            const entry = container(HashNode).of(found_node, Entry, "node");
+            const entry = found_node.entry();
             return entry.value;
         }
 
@@ -258,8 +230,8 @@ fn test_eq(a: *const HashNode, b: *const HashNode) bool {
 }
 
 fn string_eq(a: *const HashNode, b: *const HashNode) bool {
-    const entry_a = container(HashNode).of(a, Entry, "node");
-    const entry_b = container(HashNode).of(b, Entry, "node");
+    const entry_a = a.entry();
+    const entry_b = b.entry();
     return std.mem.eql(u8, entry_a.key.content, entry_b.key.content);
 }
 
@@ -268,7 +240,7 @@ test "hashtable" {
 
     const slots = 16;
     var hash_table = try HashTable.init(alloc, slots, &test_eq);
-    defer hash_table.deinit();
+    defer alloc.free(hash_table.slots);
 
     var node: HashNode = .{ .hash_code = 0 };
     hash_table.insert_node(&node);
