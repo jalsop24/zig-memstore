@@ -180,6 +180,22 @@ const HashTable = struct {
         self.insert_node(&new_entry.node);
     }
 
+    pub fn get(self: *Self, key: String) ?String {
+        const dummy_entry = Entry{
+            .key = key,
+            .value = .{ .content = "" },
+            .node = .{ .hash_code = string_hash(key) },
+        };
+        const node = self.lookup_node(&dummy_entry.node);
+
+        if (node) |found_node| {
+            const entry = container(HashNode).of(found_node, Entry, "node");
+            return entry.value;
+        }
+
+        return null;
+    }
+
     pub fn entries(self: *const Self) Iterator {
         return .{
             .h_table = self,
@@ -276,7 +292,7 @@ test "hashtable" {
     try std.testing.expect(hash_table.size == 1);
 }
 
-test "hashtable put" {
+test "hashtable string methods" {
     const alloc = std.testing.allocator;
 
     const slots = 16;
@@ -285,9 +301,12 @@ test "hashtable put" {
 
     const key: String = .{ .content = "a" };
     const value: String = .{ .content = "b" };
+    try std.testing.expect(hash_table.get(key) == null);
+
     try hash_table.put(key, value);
 
     try std.testing.expect(hash_table.size == 1);
+    try std.testing.expectEqualStrings("b", hash_table.get(key).?.content);
 
     var iter = hash_table.entries();
     var count: u32 = 0;
