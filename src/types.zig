@@ -219,10 +219,10 @@ const HashTable = struct {
     }
 };
 
+/// Simple FNV hash function
+/// see https://en.wikipedia.org/wiki/Fowler%E2%80%93Noll%E2%80%93Vo_hash_function#FNV-1a_hash
 fn string_hash(string: String) HashTable.HashType {
-    var out_buf: [16]u8 = undefined;
-    std.crypto.hash.Md5.hash(string.content, &out_buf, .{});
-    return std.mem.readPackedInt(HashTable.HashType, out_buf[0..4], 0, .little);
+    return std.hash.Fnv1a_32.hash(string.content);
 }
 
 fn test_eq(a: *const HashNode, b: *const HashNode) bool {
