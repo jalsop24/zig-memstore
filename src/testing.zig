@@ -158,5 +158,5 @@ pub const TestClient = struct {
 };
 
 pub const TestServer = struct {
-    mapping: *types.MainMapping,
+    mapping: *types.Mapping,
 };

@@ -143,86 +143,42 @@ pub fn encodeDeleteResponse(delete_response: DeleteResponse, response_buf: []u8)
     return written;
 }
 
-pub const KeyValuePair = struct {
-    key: types.String,
-    value: types.String,
-};
 const ListResponse = struct {
     len: usize = 0,
-    kv_pairs: ?[]KeyValuePair = null,
-    mapping: ?*const types.MainMapping = null,
+    mapping: *types.Mapping,
 
-    pub const Iterator = struct {
-        index: usize,
-        iter: ?types.MainMapping.Iterator = null,
-        kv_pairs: ?[]KeyValuePair = null,
-
-        pub fn next(self: *Iterator) ?KeyValuePair {
-            if (self.iter) |*iter| {
-                const entry = iter.next();
-                if (entry == null) return null;
-
-                return .{
-                    .key = .{ .content = entry.?.key_ptr.* },
-                    .value = entry.?.value_ptr.*,
-                };
-            }
-
-            const kv_pairs = self.kv_pairs.?;
-            if (self.index >= kv_pairs.len) return null;
-
-            const result = kv_pairs[self.index];
-            self.index += 1;
-            return result;
-        }
-    };
-
-    pub fn iterator(self: *const ListResponse) Iterator {
-        if (self.mapping) |mapping| {
-            return .{
-                .index = 0,
-                .iter = mapping.iterator(),
-            };
-        }
-
-        return .{
-            .index = 0,
-            .kv_pairs = self.kv_pairs,
-        };
+    pub fn iterator(self: *const ListResponse) types.Mapping.Iterator {
+        return self.mapping.iterator();
     }
 };
 
-pub fn decodeListResponse(buf: []const u8, kv_pairs: []KeyValuePair) !ListResponse {
-    const buffer_size = kv_pairs.len;
-    var cursor: usize = 0;
-    var read: usize = 0;
+pub fn decodeListResponse(buf: []const u8, allocator: std.mem.Allocator) !ListResponse {
+    var mapping = try types.Mapping.init(allocator);
 
+    var read: usize = 0;
     while (read < buf.len) {
         const key = try decodeString(buf[read..]);
         read += STR_LEN_BYTES + key.content.len;
         const value = try decodeString(buf[read..]);
         read += STR_LEN_BYTES + value.content.len;
 
-        if (cursor < buffer_size) {
-            kv_pairs[cursor] = .{
-                .key = key,
-                .value = value,
-            };
-        }
-        cursor += 1;
+        mapping.put(key, value) catch |err| switch (err) {
+            error.OutOfMemory => {
+                std.log.debug("More kv pairs available", .{});
+                break;
+            },
+        };
     }
 
-    if (cursor > buffer_size) {
-        std.log.debug("More kv pairs available: {d}", .{cursor - buffer_size});
-        cursor = buffer_size;
-    }
-
-    return .{ .kv_pairs = kv_pairs[0..cursor], .len = cursor };
+    return .{
+        .mapping = mapping,
+        .len = mapping.size,
+    };
 }
 
-pub fn encodeListReponse(list_response: ListResponse, response_buf: []u8) EncodeError!MessageLen {
+pub fn encodeListReponse(list_response: ListResponse, buf: []u8) EncodeError!MessageLen {
     var written: MessageLen = 0;
-    written += encodeCommand(Command.List, response_buf[written..]);
+    written += encodeCommand(Command.List, buf[written..]);
 
     var iterator = list_response.iterator();
     while (iterator.next()) |kv_pair| {
@@ -231,8 +187,8 @@ pub fn encodeListReponse(list_response: ListResponse, response_buf: []u8) Encode
 
         std.log.debug("key: {s}", .{key.content});
 
-        written += try encodeString(key, response_buf[written..]);
-        written += try encodeString(value, response_buf[written..]);
+        written += try encodeString(key, buf[written..]);
+        written += try encodeString(value, buf[written..]);
     }
 
     return written;
