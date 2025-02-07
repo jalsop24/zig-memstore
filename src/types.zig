@@ -237,7 +237,7 @@ const HashTable = struct {
         return self.mask & value;
     }
 
-    pub fn insert_node(self: *Self, node: *HashNode) void {
+    fn insert_node(self: *Self, node: *HashNode) void {
         const pos = self.hash(node.hash_code);
 
         node.next = self.slots[pos];
@@ -245,12 +245,12 @@ const HashTable = struct {
         self.size += 1;
     }
 
-    pub fn lookup_node(self: *Self, node: *const HashNode) ?*HashNode {
+    fn lookup_node(self: *Self, node: *const HashNode) ?*HashNode {
         const parent = self.lookup_parent(node);
         return parent.*;
     }
 
-    pub fn remove_node(self: *Self, node: *HashNode) void {
+    fn remove_node(self: *Self, node: *HashNode) void {
         const from = self.lookup_parent(node);
         const target = from.*;
         if (target == null) {
