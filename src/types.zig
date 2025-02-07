@@ -32,10 +32,7 @@ pub fn container_of(
     comptime T: type,
     comptime field_name: []const u8,
 ) *T {
-    const offset = @offsetOf(T, field_name);
-    const raw_node_ptr: [*]u8 = @ptrCast(@constCast(node));
-    const ptr: *T = @alignCast(@ptrCast(raw_node_ptr - offset));
-    return ptr;
+    return @fieldParentPtr(field_name, @constCast(node));
 }
 
 test "data from node" {
