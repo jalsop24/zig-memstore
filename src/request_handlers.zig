@@ -156,7 +156,7 @@ fn handleListCommand(conn_state: *ConnState, buf: []const u8, mapping: *Mapping)
     const written = protocol.encodeListReponse(
         .{
             .mapping = mapping,
-            .len = mapping.size,
+            .len = mapping.get_size(),
         },
         &response_buf,
     ) catch |err| switch (err) {

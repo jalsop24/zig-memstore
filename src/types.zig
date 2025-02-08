@@ -3,7 +3,7 @@ const NetConn = @import("NetConn.zig");
 
 const Allocator = std.mem.Allocator;
 
-pub const Mapping = HashTable;
+pub const Mapping = HashMap;
 pub const ConnMapping = std.AutoArrayHashMap(std.posix.socket_t, *NetConn);
 
 pub const String = struct {
@@ -56,6 +56,82 @@ test "data from node" {
 
     try std.testing.expectEqual(ptr, &container);
 }
+
+pub const HashMap = struct {
+    allocator: Allocator,
+
+    old_h_table: *HashTable,
+    new_h_table: *HashTable,
+    migrate_pos: usize,
+
+    const Self = @This();
+
+    const START_SIZE = 8;
+
+    pub fn init(allocator: Allocator) !*HashMap {
+        const new_map = try allocator.create(HashMap);
+        errdefer allocator.destroy(new_map);
+
+        const old_table = try HashTable.init(allocator, 2);
+        errdefer old_table.deinit();
+
+        new_map.* = .{
+            .allocator = allocator,
+            .old_h_table = old_table,
+            .new_h_table = try HashTable.init(allocator, START_SIZE),
+            .migrate_pos = 0,
+        };
+
+        return new_map;
+    }
+
+    pub fn deinit(self: *Self) void {
+        self.old_h_table.deinit();
+        self.new_h_table.deinit();
+        self.allocator.destroy(self);
+    }
+
+    pub fn put(self: *Self, key: String, value: String) Allocator.Error!void {
+        try self.new_h_table.put(key, value);
+    }
+
+    pub fn get(self: *Self, key: String) ?String {
+        if (self.old_h_table.get(key)) |old_val| return old_val;
+        return self.new_h_table.get(key);
+    }
+
+    pub fn remove(self: *Self, key: String) void {
+        self.new_h_table.remove(key);
+    }
+
+    pub fn get_size(self: *Self) u32 {
+        return self.old_h_table.size + self.new_h_table.size;
+    }
+
+    pub const Iterator = struct {
+        old_iter: HashTable.Iterator,
+        new_iter: HashTable.Iterator,
+
+        pub fn next(self: *Iterator) ?KVPair {
+            if (self.old_iter.next()) |entry| return entry;
+            return self.new_iter.next();
+        }
+    };
+
+    pub fn iterator(self: *Self) Iterator {
+        return .{
+            .old_iter = self.old_h_table.iterator(),
+            .new_iter = self.new_h_table.iterator(),
+        };
+    }
+
+    fn trigger_rehash(self: *Self) !void {
+        self.old_h_table.deinit();
+        self.old_h_table = self.new_h_table;
+        self.new_h_table = try HashTable.init(self.allocator, self.new_h_table.slots.len * 2);
+        self.migrate_pos = 0;
+    }
+};
 
 pub const KVPair = struct {
     key: String,
@@ -134,9 +210,7 @@ const HashTable = struct {
         }
     };
 
-    pub fn init(alloc: Allocator) !*HashTable {
-        const n_slots = 8;
-
+    pub fn init(alloc: Allocator, n_slots: u32) !*HashTable {
         std.debug.assert(n_slots % 2 == 0);
         const slots = try alloc.alloc(?*HashNode, n_slots);
         errdefer alloc.free(slots);
@@ -291,7 +365,7 @@ fn string_eq(a: *const HashNode, b: *const HashNode) bool {
 test "hashtable" {
     const alloc = std.testing.allocator;
 
-    var hash_table = try HashTable.init(alloc);
+    var hash_table = try HashTable.init(alloc, 8);
     defer {
         alloc.free(hash_table.slots);
         alloc.destroy(hash_table);
@@ -322,7 +396,7 @@ test "hashtable" {
 test "string methods" {
     const alloc = std.testing.allocator;
 
-    var hash_table = try HashTable.init(alloc);
+    var hash_table = try HashTable.init(alloc, 8);
     defer hash_table.deinit();
 
     const key: String = .{ .content = "a" };
@@ -345,4 +419,14 @@ test "string methods" {
     hash_table.remove(key);
 
     try std.testing.expect(hash_table.size == 0);
+}
+
+test "hashmap" {
+    const alloc = std.testing.allocator;
+    var hash_map = try HashMap.init(alloc);
+    defer hash_map.deinit();
+
+    try hash_map.put(.{ .content = "a" }, .{ .content = "1" });
+    const value = hash_map.get(.{ .content = "a" });
+    try std.testing.expectEqualStrings("1", value.?.content);
 }

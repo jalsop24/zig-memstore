@@ -172,7 +172,7 @@ pub fn decodeListResponse(buf: []const u8, allocator: std.mem.Allocator) !ListRe
 
     return .{
         .mapping = mapping,
-        .len = mapping.size,
+        .len = mapping.get_size(),
     };
 }
 
