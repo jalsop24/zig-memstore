@@ -70,4 +70,15 @@ pub fn build(b: *std.Build) void {
     // running the unit tests.
     const test_step = b.step("test", "Run unit tests");
     test_step.dependOn(&run_exe_unit_tests.step);
+
+    // Benchmarks set up
+    const exe_benchmarks = b.addTest(.{
+        .root_source_file = b.path("src/benchmarks.zig"),
+        .target = target,
+        .optimize = .ReleaseFast,
+        .filters = &.{"benchmarks"},
+    });
+    const run_benchmarks = b.addRunArtifact(exe_benchmarks);
+    const benchmark_step = b.step("benchmark", "Run benchmarks");
+    benchmark_step.dependOn(&run_benchmarks.step);
 }

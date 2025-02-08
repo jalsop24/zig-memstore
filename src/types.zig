@@ -62,11 +62,13 @@ pub const HashMap = struct {
 
     old_h_table: *HashTable,
     new_h_table: *HashTable,
-    migrate_pos: usize,
+    migration_iter: HashTable.Iterator,
 
     const Self = @This();
 
     const START_SIZE = 8;
+    const MAX_LOAD_FACTOR = 8;
+    const MIGRATION_WORK = 128;
 
     pub fn init(allocator: Allocator) !*HashMap {
         const new_map = try allocator.create(HashMap);
@@ -79,7 +81,7 @@ pub const HashMap = struct {
             .allocator = allocator,
             .old_h_table = old_table,
             .new_h_table = try HashTable.init(allocator, START_SIZE),
-            .migrate_pos = 0,
+            .migration_iter = old_table.iterator(),
         };
 
         return new_map;
@@ -93,15 +95,29 @@ pub const HashMap = struct {
 
     pub fn put(self: *Self, key: String, value: String) Allocator.Error!void {
         try self.new_h_table.put(key, value);
+
+        if (self.old_h_table.size == 0) {
+            const max_entries = self.new_h_table.slots.len * MAX_LOAD_FACTOR;
+            if (self.new_h_table.size >= max_entries) {
+                try self.trigger_rehash();
+            }
+        }
+
+        self.migrate_entries();
     }
 
     pub fn get(self: *Self, key: String) ?String {
         if (self.old_h_table.get(key)) |old_val| return old_val;
+
+        self.migrate_entries();
+
         return self.new_h_table.get(key);
     }
 
     pub fn remove(self: *Self, key: String) void {
         self.new_h_table.remove(key);
+
+        self.migrate_entries();
     }
 
     pub fn get_size(self: *Self) u32 {
@@ -125,11 +141,32 @@ pub const HashMap = struct {
         };
     }
 
-    fn trigger_rehash(self: *Self) !void {
+    fn trigger_rehash(self: *Self) Allocator.Error!void {
+        // Make sure there's no entries left to migrate
+        std.debug.assert(self.migration_iter.next() == null);
+
+        // So we can safely intcast. This would be an absurdly large hash table though...
+        if (2 * self.new_h_table.slots.len >= std.math.maxInt(u32)) {
+            return;
+        }
+
         self.old_h_table.deinit();
         self.old_h_table = self.new_h_table;
-        self.new_h_table = try HashTable.init(self.allocator, self.new_h_table.slots.len * 2);
-        self.migrate_pos = 0;
+        self.new_h_table = try HashTable.init(self.allocator, @intCast(2 * self.new_h_table.slots.len));
+        self.migration_iter = self.old_h_table.iterator();
+    }
+
+    fn migrate_entries(self: *Self) void {
+        var work_done: u32 = 0;
+        while (self.migration_iter.next_entry()) |entry| {
+            self.old_h_table.remove_node(&entry.node);
+            self.new_h_table.insert_node(&entry.node);
+            work_done += 1;
+
+            if (work_done > MIGRATION_WORK) {
+                break;
+            }
+        }
     }
 };
 
@@ -210,7 +247,7 @@ const HashTable = struct {
         }
     };
 
-    pub fn init(alloc: Allocator, n_slots: u32) !*HashTable {
+    pub fn init(alloc: Allocator, n_slots: u32) Allocator.Error!*HashTable {
         std.debug.assert(n_slots % 2 == 0);
         const slots = try alloc.alloc(?*HashNode, n_slots);
         errdefer alloc.free(slots);
@@ -429,4 +466,26 @@ test "hashmap" {
     try hash_map.put(.{ .content = "a" }, .{ .content = "1" });
     const value = hash_map.get(.{ .content = "a" });
     try std.testing.expectEqualStrings("1", value.?.content);
+}
+
+test "hashmap resize" {
+    const alloc = std.testing.allocator;
+    var hash_map = try HashMap.init(alloc);
+    defer hash_map.deinit();
+
+    const start_table = hash_map.new_h_table;
+
+    var arena = std.heap.ArenaAllocator.init(alloc);
+    defer arena.deinit();
+
+    const num_ops = 10_000;
+    for (0..num_ops) |i| {
+        try hash_map.put(
+            .{ .content = try std.fmt.allocPrint(arena.allocator(), "key {d}", .{i}) },
+            .{ .content = try std.fmt.allocPrint(arena.allocator(), "val {d}", .{i}) },
+        );
+        _ = hash_map.get(.{ .content = "key 1" });
+    }
+
+    try std.testing.expect(start_table != hash_map.new_h_table);
 }
