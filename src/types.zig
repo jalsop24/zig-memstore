@@ -208,7 +208,6 @@ const HashTable = struct {
     const Self = @This();
 
     const HashType = u32;
-    const EqFunc = *const fn (*const HashNode, *const HashNode) bool;
 
     pub const Iterator = struct {
         pos: u32,
