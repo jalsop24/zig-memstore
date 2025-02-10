@@ -165,9 +165,3 @@ fn handleListCommand(conn_state: *ConnState, buf: []const u8, mapping: *Mapping)
 
     try writeResponse(conn_state, response_buf[0..written]);
 }
-
-fn encodeString(string: String, buf: []u8) HandleRequestError!protocol.StringLen {
-    return protocol.encodeString(string, buf) catch |err| switch (err) {
-        EncodeError.BufferTooSmall => return HandleRequestError.InvalidRequest,
-    };
-}
