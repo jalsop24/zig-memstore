@@ -6,6 +6,20 @@ const Allocator = std.mem.Allocator;
 pub const Mapping = HashMap;
 pub const ConnMapping = std.AutoArrayHashMap(std.posix.socket_t, *NetConn);
 
+pub const Object = union(enum(u8)) {
+    nil: Nil = 0,
+    integer: Integer = 1,
+    double: Double = 2,
+    string: String = 3,
+    array: Array = 4,
+};
+
+pub const Nil = void;
+
+pub const Integer = u64;
+
+pub const Double = f64;
+
 pub const String = struct {
     content: []const u8,
 
@@ -24,6 +38,10 @@ pub const String = struct {
     pub fn clone(self: *const String, allocator: Allocator) Allocator.Error!String {
         return String.init(allocator, self.content);
     }
+};
+
+pub const Array = struct {
+    objects: []const Object,
 };
 
 /// For use with intrusive data structures. `node` must be embedded within an instance of the type `T`
