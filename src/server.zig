@@ -10,14 +10,14 @@ const connectionIo = @import("connection_io.zig").connectionIo;
 
 const NetConn = @import("NetConn.zig");
 
-const MainMapping = types.MainMapping;
+const Mapping = types.Mapping;
 const ConnMapping = types.ConnMapping;
 
 const Command = protocol.Command;
 
 pub const Server = struct {
     handle: std.posix.socket_t,
-    mapping: *MainMapping,
+    mapping: *Mapping,
     conn_mapping: *ConnMapping,
 
     pub fn run(self: Server) !void {
@@ -96,13 +96,13 @@ pub const Server = struct {
     }
 };
 
-test "simple get req" {
+test "req get" {
     const allocator = std.testing.allocator;
-    var mapping = MainMapping.init(allocator);
+    var mapping = try Mapping.init(allocator);
     defer mapping.deinit();
 
     var server = testing.TestServer{
-        .mapping = &mapping,
+        .mapping = mapping,
     };
 
     const client = try testing.TestClient.init(allocator);
@@ -121,19 +121,13 @@ test "simple get req" {
     try std.testing.expectEqual(get_reponse.value, null);
 }
 
-test "set req" {
+test "req set" {
     const allocator = std.testing.allocator;
-    var mapping = MainMapping.init(allocator);
-    defer {
-        for (mapping.keys(), mapping.values()) |key, val| {
-            allocator.free(key);
-            val.deinit(allocator);
-        }
-        mapping.deinit();
-    }
+    var mapping = try Mapping.init(allocator);
+    defer mapping.deinit();
 
     var server = testing.TestServer{
-        .mapping = &mapping,
+        .mapping = mapping,
     };
 
     const client = try testing.TestClient.init(allocator);
@@ -152,19 +146,13 @@ test "set req" {
     try std.testing.expectEqualStrings(set_reponse.value.content, "1");
 }
 
-test "del req" {
+test "req del" {
     const allocator = std.testing.allocator;
-    var mapping = MainMapping.init(allocator);
-    defer {
-        for (mapping.keys(), mapping.values()) |key, val| {
-            allocator.free(key);
-            val.deinit(allocator);
-        }
-        mapping.deinit();
-    }
+    var mapping = try Mapping.init(allocator);
+    defer mapping.deinit();
 
     var server = testing.TestServer{
-        .mapping = &mapping,
+        .mapping = mapping,
     };
 
     const client = try testing.TestClient.init(allocator);
@@ -182,20 +170,37 @@ test "del req" {
     try std.testing.expectEqualStrings(delete_reponse.key.content, "a");
 }
 
-test "lst req" {
+test "req lst" {
     const allocator = std.testing.allocator;
-    var mapping = MainMapping.init(allocator);
+    var mapping = try Mapping.init(allocator);
     defer mapping.deinit();
 
     var server = testing.TestServer{
-        .mapping = &mapping,
+        .mapping = mapping,
     };
 
     const client = try testing.TestClient.init(allocator);
     defer client.deinit();
     client.server = &server;
+    {
+        const response = try client.sendListRequest("");
 
-    try mapping.put("a", types.String{ .content = "1" });
+        std.log.debug("list response = {x}", .{response});
+
+        const command = try protocol.decodeCommand(response);
+        try std.testing.expectEqual(command, Command.List);
+
+        const list_response = try protocol.decodeListResponse(
+            response[protocol.COMMAND_LEN_BYTES..],
+            allocator,
+        );
+        defer list_response.mapping.deinit();
+
+        try std.testing.expect(list_response.len == 0);
+    }
+
+    // Insert actual data into the mapping
+    try mapping.put(.{ .content = "a" }, .{ .content = "1" });
 
     const response = try client.sendListRequest("");
 
@@ -204,11 +209,12 @@ test "lst req" {
     const command = protocol.decodeCommand(response);
     try std.testing.expectEqual(command, Command.List);
 
-    var buf: [10]protocol.KeyValuePair = undefined;
     const list_response = try protocol.decodeListResponse(
         response[protocol.COMMAND_LEN_BYTES..],
-        &buf,
+        allocator,
     );
+    defer list_response.mapping.deinit();
+
     try std.testing.expect(list_response.len == 1);
     var iter = list_response.iterator();
     const kv_pair = iter.next().?;

@@ -28,6 +28,10 @@ pub const TestConn = struct {
 
     pub fn readFn(ptr: *anyopaque, buffer: []u8) !usize {
         var self: *TestConn = @ptrCast(@alignCast(ptr));
+
+        if (self.client_to_server_stream.pos >= self.client_to_server_stream.buffer.len) {
+            return error.WouldBlock;
+        }
         const reader = self.client_to_server_stream.reader();
         return reader.read(buffer);
     }
@@ -97,7 +101,12 @@ pub const TestClient = struct {
 
     pub fn sendRequest(self: *TestClient, buf: []const u8) ![]u8 {
         std.log.debug("send req", .{});
+        self.cs_stream.buffer = self.cs_stream_buf[0..];
+        self.cs_stream.reset();
+        self.sc_stream.reset();
+
         _ = try self.cs_stream.write(buf);
+        self.cs_stream.buffer.len = buf.len;
         std.log.debug("seek to", .{});
         try self.cs_stream.seekTo(0);
         std.log.debug("finish send req", .{});
@@ -149,5 +158,5 @@ pub const TestClient = struct {
 };
 
 pub const TestServer = struct {
-    mapping: *types.MainMapping,
+    mapping: *types.Mapping,
 };

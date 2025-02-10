@@ -1,9 +1,12 @@
 
-RUN := docker compose run --rm --remove-orphans --build
+RUN := docker compose run --rm --remove-orphans --build -v "$(shell pwd)/.zig-cache:/app/.zig-cache/"
 TEST := zig build test --summary all
 
 test:
 	${RUN} --entrypoint="${TEST}" shell
+
+benchmark:
+	${RUN} --entrypoint="zig build benchmark --summary all" shell
 
 run:
 	docker compose up -d --build server

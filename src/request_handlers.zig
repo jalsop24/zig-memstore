@@ -5,7 +5,7 @@ const protocol = @import("protocol.zig");
 const types = @import("types.zig");
 
 const ConnState = connection.ConnState;
-const MainMapping = types.MainMapping;
+const Mapping = types.Mapping;
 const MessageBuffer = protocol.MessageBuffer;
 const String = types.String;
 
@@ -15,8 +15,8 @@ const Command = protocol.Command;
 const DecodeError = protocol.DecodeError;
 const EncodeError = protocol.EncodeError;
 
-pub fn parseRequest(conn_state: *ConnState, buf: []u8, main_mapping: *MainMapping) void {
-    parseRequestInner(conn_state, buf, main_mapping) catch |err| switch (err) {
+pub fn parseRequest(conn_state: *ConnState, buf: []u8, mapping: *Mapping) void {
+    parseRequestInner(conn_state, buf, mapping) catch |err| switch (err) {
         // Length check has already been completed
         HandleRequestError.MessageTooLong => unreachable,
         HandleRequestError.InvalidRequest => {
@@ -25,7 +25,7 @@ pub fn parseRequest(conn_state: *ConnState, buf: []u8, main_mapping: *MainMappin
     };
 }
 
-fn parseRequestInner(conn_state: *ConnState, buf: []u8, main_mapping: *MainMapping) HandleRequestError!void {
+fn parseRequestInner(conn_state: *ConnState, buf: []u8, mapping: *Mapping) HandleRequestError!void {
 
     // Support get, set, del
 
@@ -33,10 +33,10 @@ fn parseRequestInner(conn_state: *ConnState, buf: []u8, main_mapping: *MainMappi
 
     const command = protocol.decodeCommand(buf) catch return HandleRequestError.InvalidRequest;
     switch (command) {
-        .Get => try handleGetCommand(conn_state, buf[protocol.COMMAND_LEN_BYTES..], main_mapping),
-        .Set => try handleSetCommand(conn_state, buf[protocol.COMMAND_LEN_BYTES..], main_mapping),
-        .Delete => try handleDeleteCommand(conn_state, buf[protocol.COMMAND_LEN_BYTES..], main_mapping),
-        .List => try handleListCommand(conn_state, buf[protocol.COMMAND_LEN_BYTES..], main_mapping),
+        .Get => try handleGetCommand(conn_state, buf[protocol.COMMAND_LEN_BYTES..], mapping),
+        .Set => try handleSetCommand(conn_state, buf[protocol.COMMAND_LEN_BYTES..], mapping),
+        .Delete => try handleDeleteCommand(conn_state, buf[protocol.COMMAND_LEN_BYTES..], mapping),
+        .List => try handleListCommand(conn_state, buf[protocol.COMMAND_LEN_BYTES..], mapping),
         .Unknown => handleUnknownCommand(conn_state, buf),
     }
 }
@@ -56,7 +56,7 @@ fn handleUnknownCommand(conn_state: *ConnState, bytes: []const u8) void {
     conn_state.wbuf_size = protocol.len_header_size + bytes.len;
 }
 
-fn handleGetCommand(conn_state: *ConnState, buf: []u8, main_mapping: *MainMapping) HandleRequestError!void {
+fn handleGetCommand(conn_state: *ConnState, buf: []u8, mapping: *Mapping) HandleRequestError!void {
     std.log.info("Get command '{0s}' ({0x})", .{buf});
 
     if (buf.len < protocol.STR_LEN_BYTES) {
@@ -72,7 +72,7 @@ fn handleGetCommand(conn_state: *ConnState, buf: []u8, main_mapping: *MainMappin
     };
 
     std.log.info("Get key '{s}'", .{key.content});
-    const value = main_mapping.get(key.content);
+    const value = mapping.get(key);
 
     var response_buf: MessageBuffer = undefined;
     const written: protocol.MessageLen = protocol.encodeGetResponse(.{
@@ -85,7 +85,7 @@ fn handleGetCommand(conn_state: *ConnState, buf: []u8, main_mapping: *MainMappin
     try writeResponse(conn_state, response_buf[0..written]);
 }
 
-fn handleSetCommand(conn_state: *ConnState, buf: []u8, main_mapping: *MainMapping) HandleRequestError!void {
+fn handleSetCommand(conn_state: *ConnState, buf: []u8, mapping: *Mapping) HandleRequestError!void {
     std.log.info("Set command '{0s}' ({0x})", .{buf});
 
     if (buf.len < 2 * protocol.STR_LEN_BYTES) {
@@ -109,17 +109,8 @@ fn handleSetCommand(conn_state: *ConnState, buf: []u8, main_mapping: *MainMappin
         },
     };
 
-    const new_key = main_mapping.allocator.alloc(u8, key.content.len) catch return HandleRequestError.InvalidRequest;
-    errdefer main_mapping.allocator.free(new_key);
-    @memcpy(new_key, key.content);
-
-    const new_val = String.init(main_mapping.allocator, value.content) catch |err| switch (err) {
-        error.OutOfMemory => return HandleRequestError.InvalidRequest,
-    };
-    errdefer new_val.deinit(main_mapping.allocator);
-
-    main_mapping.put(new_key, new_val) catch {
-        std.log.debug("Failed to put into mapping {any}", .{new_val});
+    mapping.put(key, value) catch {
+        std.log.debug("Failed to put into mapping {any}", .{value});
         return HandleRequestError.InvalidRequest;
     };
 
@@ -134,7 +125,7 @@ fn handleSetCommand(conn_state: *ConnState, buf: []u8, main_mapping: *MainMappin
     try writeResponse(conn_state, response_buf[0..written]);
 }
 
-fn handleDeleteCommand(conn_state: *ConnState, buf: []const u8, main_mapping: *MainMapping) HandleRequestError!void {
+fn handleDeleteCommand(conn_state: *ConnState, buf: []const u8, mapping: *Mapping) HandleRequestError!void {
     std.log.info("Delete command '{0s}' (0x)", .{buf});
 
     if (buf.len < protocol.STR_LEN_BYTES) {
@@ -146,7 +137,7 @@ fn handleDeleteCommand(conn_state: *ConnState, buf: []const u8, main_mapping: *M
         DecodeError.InvalidString => return HandleRequestError.InvalidRequest,
     };
 
-    _ = main_mapping.swapRemove(key.content);
+    mapping.remove(key);
 
     var response_buf: MessageBuffer = undefined;
     const written = protocol.encodeDeleteResponse(.{
@@ -158,14 +149,14 @@ fn handleDeleteCommand(conn_state: *ConnState, buf: []const u8, main_mapping: *M
     try writeResponse(conn_state, response_buf[0..written]);
 }
 
-fn handleListCommand(conn_state: *ConnState, buf: []const u8, main_mapping: *MainMapping) HandleRequestError!void {
+fn handleListCommand(conn_state: *ConnState, buf: []const u8, mapping: *Mapping) HandleRequestError!void {
     std.log.info("List command '{0s}' (0x)", .{buf});
 
     var response_buf: MessageBuffer = undefined;
     const written = protocol.encodeListReponse(
         .{
-            .mapping = main_mapping,
-            .len = main_mapping.keys().len,
+            .mapping = mapping,
+            .len = mapping.get_size(),
         },
         &response_buf,
     ) catch |err| switch (err) {

@@ -56,9 +56,12 @@ fn handleDeleteResponse(buf: []const u8) !void {
 }
 
 fn handleListResponse(buf: []const u8) !void {
-    const buffer_size = 100;
-    var kv_pairs: [buffer_size]protocol.KeyValuePair = undefined;
-    const list_response = try protocol.decodeListResponse(buf, &kv_pairs);
+    var list_buf: [1000]u8 = undefined;
+    var fba = std.heap.FixedBufferAllocator.init(&list_buf);
+    const alloc = fba.allocator();
+
+    const list_response = try protocol.decodeListResponse(buf, alloc);
+    defer list_response.mapping.deinit();
 
     if (list_response.len == 0) {
         std.log.info("no keys", .{});

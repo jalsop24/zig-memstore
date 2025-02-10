@@ -57,19 +57,13 @@ pub fn main() !void {
         fd2conn.deinit();
     }
 
-    var main_mapping = types.MainMapping.init(allocator);
-    defer {
-        for (main_mapping.keys(), main_mapping.values()) |key, val| {
-            allocator.free(key);
-            val.deinit(allocator);
-        }
-        main_mapping.deinit();
-    }
+    var main_mapping = try types.Mapping.init(allocator);
+    defer main_mapping.deinit();
 
     const server = Server{
         .handle = tcp_server.stream.handle,
         .conn_mapping = &fd2conn,
-        .mapping = &main_mapping,
+        .mapping = main_mapping,
     };
 
     std.log.debug("Server fd {}", .{server.handle});

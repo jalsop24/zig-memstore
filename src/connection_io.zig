@@ -6,9 +6,9 @@ const protocol = @import("protocol.zig");
 const parseRequest = @import("request_handlers.zig").parseRequest;
 
 const GenericConn = connection.GenericConn;
-const MainMapping = types.MainMapping;
+const Mapping = types.Mapping;
 
-pub fn connectionIo(conn: GenericConn, main_mapping: *MainMapping) !void {
+pub fn connectionIo(conn: GenericConn, main_mapping: *Mapping) !void {
     switch (conn.state.state) {
         .REQ => stateReq(conn, main_mapping),
         .RES => stateRes(conn),
@@ -40,11 +40,11 @@ fn tryFlushBuffer(conn: GenericConn) bool {
     return false;
 }
 
-fn stateReq(conn: GenericConn, main_mapping: *MainMapping) void {
-    while (tryFillBuffer(conn, main_mapping)) {}
+fn stateReq(conn: GenericConn, mapping: *Mapping) void {
+    while (tryFillBuffer(conn, mapping)) {}
 }
 
-fn tryFillBuffer(conn: GenericConn, main_mapping: *MainMapping) bool {
+fn tryFillBuffer(conn: GenericConn, mapping: *Mapping) bool {
     // Reset buffer so that it is filled right from the start
     std.log.debug("Try fill buffer", .{});
 
@@ -82,11 +82,11 @@ fn tryFillBuffer(conn: GenericConn, main_mapping: *MainMapping) bool {
     std.debug.assert(conn_state.rbuf_size < conn_state.rbuf.len);
 
     // Parse multiple requests as more than one may be sent at a time
-    while (tryOneRequest(conn, main_mapping)) {}
+    while (tryOneRequest(conn, mapping)) {}
     return (conn_state.state == .REQ);
 }
 
-fn tryOneRequest(conn: GenericConn, main_mapping: *MainMapping) bool {
+fn tryOneRequest(conn: GenericConn, mapping: *Mapping) bool {
     var conn_state = conn.state;
     if (conn_state.rbuf_size < protocol.len_header_size) {
         // Not enough data in the buffer, try after the next poll
@@ -114,7 +114,7 @@ fn tryOneRequest(conn: GenericConn, main_mapping: *MainMapping) bool {
     }
 
     const message = conn_state.rbuf[conn_state.rbuf_cursor + protocol.len_header_size ..][0..len];
-    parseRequest(conn_state, message, main_mapping);
+    parseRequest(conn_state, message, mapping);
 
     // 'Remove' request from read buffer
     const remaining_bytes = conn_state.rbuf_size - protocol.len_header_size - len;
