@@ -4,6 +4,7 @@ const types = @import("types.zig");
 const serialization = @import("serialization.zig");
 
 const Command = types.Command;
+
 const Encoder = serialization.Encoder;
 
 const encodeGenericInteger = serialization.encodeGenericInteger;
@@ -22,7 +23,7 @@ pub const PayloadCreationError = error{MessageTooLong};
 
 pub const MessageBuffer = [len_header_size + k_max_msg]u8;
 
-pub const EncodeError = error{BufferTooSmall};
+pub const EncodeError = serialization.EncodeError;
 pub const DecodeError = error{InvalidString};
 
 pub fn createPayload(message: []const u8, buf: []u8) PayloadCreationError!usize {
@@ -177,21 +178,6 @@ pub fn encodeListReponse(list_response: ListResponse, buf: []u8) EncodeError!usi
     return encoder.written;
 }
 
-fn commandIs(buf: []const u8, command: []const u8) bool {
-    return std.mem.eql(u8, buf, command);
-}
-
-pub fn parseCommand(buf: []const u8) Command {
-    if (buf.len < 3) return Command.Unknown;
-
-    if (commandIs(buf[0..3], Command.GET_LITERAL)) return Command.Get;
-    if (commandIs(buf[0..3], Command.SET_LITERAL)) return Command.Set;
-    if (commandIs(buf[0..3], Command.DELETE_LITERAL)) return Command.Delete;
-    if (commandIs(buf[0..3], Command.LIST_LITERAL)) return Command.List;
-
-    return Command.Unknown;
-}
-
 pub fn decodeCommand(buf: []const u8) !Command {
     return try std.meta.intToEnum(Command, buf[0]);
 }
@@ -324,6 +310,6 @@ fn encodeCommand(command: Command, buf: []u8) !usize {
     return try encoder.encodeCommand(command);
 }
 
-fn writeHeader(message_len: usize, buf: []u8) serialization.EncodeError!usize {
+fn writeHeader(message_len: usize, buf: []u8) EncodeError!usize {
     return try encodeGenericInteger(MessageLen, @intCast(message_len), buf);
 }

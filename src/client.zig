@@ -125,7 +125,7 @@ pub fn main() !void {
             break;
         }
 
-        switch (protocol.parseCommand(message)) {
+        switch (parseCommand(message)) {
             .Get => {
                 wlen = try protocol.createGetReq(message[3..], &wbuf);
             },
@@ -158,4 +158,19 @@ pub fn main() !void {
         std.log.info("Received from server '{0s}' ({0x})", .{response});
         try handleResponse(response);
     }
+}
+
+fn parseCommand(buf: []const u8) Command {
+    if (buf.len < 3) return Command.Unknown;
+
+    if (commandIs(buf[0..3], Command.GET_LITERAL)) return Command.Get;
+    if (commandIs(buf[0..3], Command.SET_LITERAL)) return Command.Set;
+    if (commandIs(buf[0..3], Command.DELETE_LITERAL)) return Command.Delete;
+    if (commandIs(buf[0..3], Command.LIST_LITERAL)) return Command.List;
+
+    return Command.Unknown;
+}
+
+fn commandIs(buf: []const u8, command: []const u8) bool {
+    return std.mem.eql(u8, buf, command);
 }
