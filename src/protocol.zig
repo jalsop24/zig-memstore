@@ -3,6 +3,7 @@ const builtin = @import("builtin");
 const types = @import("types.zig");
 const serialization = @import("serialization.zig");
 
+const Command = types.Command;
 const Encoder = serialization.Encoder;
 
 const encodeGenericInteger = serialization.encodeGenericInteger;
@@ -17,28 +18,12 @@ pub const len_header_size: u8 = @sizeOf(MessageLen);
 pub const StringLen = u16;
 pub const STR_LEN_BYTES = @sizeOf(StringLen);
 
-pub const CommandLen = u8;
-pub const COMMAND_LEN_BYTES = @sizeOf(CommandLen);
-
 pub const PayloadCreationError = error{MessageTooLong};
 
 pub const MessageBuffer = [len_header_size + k_max_msg]u8;
 
 pub const EncodeError = error{BufferTooSmall};
 pub const DecodeError = error{InvalidString};
-
-pub const Command = enum(CommandLen) {
-    Get = 1,
-    Set = 2,
-    Delete = 3,
-    List = 4,
-    Unknown = 5,
-
-    pub const GET_LITERAL = "get";
-    pub const SET_LITERAL = "set";
-    pub const DELETE_LITERAL = "del";
-    pub const LIST_LITERAL = "lst";
-};
 
 pub fn createPayload(message: []const u8, buf: []u8) PayloadCreationError!usize {
     const len = message.len;

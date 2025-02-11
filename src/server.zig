@@ -10,10 +10,11 @@ const connectionIo = @import("connection_io.zig").connectionIo;
 
 const NetConn = @import("NetConn.zig");
 
-const Mapping = types.Mapping;
+const Command = types.Command;
 const ConnMapping = types.ConnMapping;
+const Mapping = types.Mapping;
 
-const Command = protocol.Command;
+const COMMAND_LEN_BYTES = types.COMMAND_LEN_BYTES;
 
 pub const Server = struct {
     handle: std.posix.socket_t,
@@ -116,7 +117,7 @@ test "req get" {
     const command = protocol.decodeCommand(response);
     try std.testing.expectEqual(command, Command.Get);
 
-    const get_reponse = try protocol.decodeGetResponse(response[protocol.COMMAND_LEN_BYTES..]);
+    const get_reponse = try protocol.decodeGetResponse(response[COMMAND_LEN_BYTES..]);
     try std.testing.expectEqualStrings(get_reponse.key.content, "key");
     try std.testing.expectEqual(get_reponse.value, null);
 }
@@ -141,7 +142,7 @@ test "req set" {
     const command = protocol.decodeCommand(response);
     try std.testing.expectEqual(command, Command.Set);
 
-    const set_reponse = try protocol.decodeSetResponse(response[protocol.COMMAND_LEN_BYTES..]);
+    const set_reponse = try protocol.decodeSetResponse(response[COMMAND_LEN_BYTES..]);
     try std.testing.expectEqualStrings(set_reponse.key.content, "a");
     try std.testing.expectEqualStrings(set_reponse.value.content, "1");
 }
@@ -166,7 +167,7 @@ test "req del" {
     const command = protocol.decodeCommand(response);
     try std.testing.expectEqual(command, Command.Delete);
 
-    const delete_reponse = try protocol.decodeDeleteResponse(response[protocol.COMMAND_LEN_BYTES..]);
+    const delete_reponse = try protocol.decodeDeleteResponse(response[COMMAND_LEN_BYTES..]);
     try std.testing.expectEqualStrings(delete_reponse.key.content, "a");
 }
 
@@ -191,7 +192,7 @@ test "req lst" {
         try std.testing.expectEqual(command, Command.List);
 
         const list_response = try protocol.decodeListResponse(
-            response[protocol.COMMAND_LEN_BYTES..],
+            response[COMMAND_LEN_BYTES..],
             allocator,
         );
         defer list_response.mapping.deinit();
@@ -210,7 +211,7 @@ test "req lst" {
     try std.testing.expectEqual(command, Command.List);
 
     const list_response = try protocol.decodeListResponse(
-        response[protocol.COMMAND_LEN_BYTES..],
+        response[COMMAND_LEN_BYTES..],
         allocator,
     );
     defer list_response.mapping.deinit();

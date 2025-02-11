@@ -11,7 +11,9 @@ const String = types.String;
 
 const HandleRequestError = error{InvalidRequest} || protocol.PayloadCreationError;
 
-const Command = protocol.Command;
+const Command = types.Command;
+const COMMAND_LEN_BYTES = types.COMMAND_LEN_BYTES;
+
 const DecodeError = protocol.DecodeError;
 const EncodeError = protocol.EncodeError;
 
@@ -29,14 +31,14 @@ fn parseRequestInner(conn_state: *ConnState, buf: []u8, mapping: *Mapping) Handl
 
     // Support get, set, del
 
-    if (buf.len < protocol.COMMAND_LEN_BYTES) return handleUnknownCommand(conn_state, buf);
+    if (buf.len < COMMAND_LEN_BYTES) return handleUnknownCommand(conn_state, buf);
 
     const command = protocol.decodeCommand(buf) catch return HandleRequestError.InvalidRequest;
     switch (command) {
-        .Get => try handleGetCommand(conn_state, buf[protocol.COMMAND_LEN_BYTES..], mapping),
-        .Set => try handleSetCommand(conn_state, buf[protocol.COMMAND_LEN_BYTES..], mapping),
-        .Delete => try handleDeleteCommand(conn_state, buf[protocol.COMMAND_LEN_BYTES..], mapping),
-        .List => try handleListCommand(conn_state, buf[protocol.COMMAND_LEN_BYTES..], mapping),
+        .Get => try handleGetCommand(conn_state, buf[COMMAND_LEN_BYTES..], mapping),
+        .Set => try handleSetCommand(conn_state, buf[COMMAND_LEN_BYTES..], mapping),
+        .Delete => try handleDeleteCommand(conn_state, buf[COMMAND_LEN_BYTES..], mapping),
+        .List => try handleListCommand(conn_state, buf[COMMAND_LEN_BYTES..], mapping),
         .Unknown => handleUnknownCommand(conn_state, buf),
     }
 }

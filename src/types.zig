@@ -44,6 +44,20 @@ pub const Array = struct {
     objects: []const Object,
 };
 
+pub const Command = enum(u8) {
+    Get = 1,
+    Set = 2,
+    Delete = 3,
+    List = 4,
+    Unknown = 5,
+
+    pub const GET_LITERAL = "get";
+    pub const SET_LITERAL = "set";
+    pub const DELETE_LITERAL = "del";
+    pub const LIST_LITERAL = "lst";
+};
+pub const COMMAND_LEN_BYTES = @sizeOf(Command);
+
 /// For use with intrusive data structures. `node` must be embedded within an instance of the type `T`
 pub fn container_of(
     node: anytype,

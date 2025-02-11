@@ -2,9 +2,12 @@ const std = @import("std");
 
 const protocol = @import("protocol.zig");
 const cli = @import("cli.zig");
+const types = @import("types.zig");
 
 const LogLevel = std.log.Level;
-const Command = protocol.Command;
+
+const Command = types.Command;
+const COMMAND_LEN_BYTES = types.COMMAND_LEN_BYTES;
 
 pub const std_options: std.Options = .{
     .log_level = LogLevel.debug,
@@ -18,7 +21,7 @@ fn handleResponse(buf: []const u8) !void {
         },
     };
 
-    const body = buf[protocol.COMMAND_LEN_BYTES..];
+    const body = buf[COMMAND_LEN_BYTES..];
     switch (command) {
         Command.Get => try handleGetResponse(body),
         Command.Set => try handleSetResponse(body),
