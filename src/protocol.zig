@@ -80,14 +80,14 @@ pub fn decodeGetResponse(buf: []const u8) !GetResponse {
 }
 
 pub fn encodeGetResponse(get_response: GetResponse, buf: []u8) EncodeError!usize {
-    const command_len = encodeCommand(Command.Get, buf);
+    var encoder = Encoder{ .buf = buf };
 
-    var encoder = Encoder{ .buf = buf[command_len..] };
+    _ = try encoder.encodeCommand(Command.Get);
     _ = try encoder.encodeString(get_response.key);
     if (get_response.value) |value_string| {
         _ = try encoder.encodeString(value_string);
     }
-    return command_len + encoder.written;
+    return encoder.written;
 }
 
 pub const SetResponse = struct {
@@ -105,13 +105,12 @@ pub fn decodeSetResponse(buf: []const u8) !SetResponse {
 }
 
 pub fn encodeSetResponse(set_response: SetResponse, buf: []u8) EncodeError!usize {
-    const command_len = encodeCommand(Command.Set, buf);
-
-    var encoder = Encoder{ .buf = buf[command_len..] };
+    var encoder = Encoder{ .buf = buf };
+    _ = try encoder.encodeCommand(Command.Set);
     _ = try encoder.encodeString(set_response.key);
     _ = try encoder.encodeString(set_response.value);
 
-    return command_len + encoder.written;
+    return encoder.written;
 }
 
 const DeleteResponse = struct {
@@ -123,12 +122,11 @@ pub fn decodeDeleteResponse(buf: []const u8) !DeleteResponse {
     return .{ .key = key };
 }
 
-pub fn encodeDeleteResponse(delete_response: DeleteResponse, response_buf: []u8) EncodeError!usize {
-    const command_len = encodeCommand(Command.Delete, response_buf);
-
-    var encoder = Encoder{ .buf = response_buf[command_len..] };
+pub fn encodeDeleteResponse(delete_response: DeleteResponse, buf: []u8) EncodeError!usize {
+    var encoder = Encoder{ .buf = buf };
+    _ = try encoder.encodeCommand(Command.Delete);
     _ = try encoder.encodeString(delete_response.key);
-    return command_len + encoder.written;
+    return encoder.written;
 }
 
 const ListResponse = struct {
@@ -165,9 +163,10 @@ pub fn decodeListResponse(buf: []const u8, allocator: std.mem.Allocator) !ListRe
 }
 
 pub fn encodeListReponse(list_response: ListResponse, buf: []u8) EncodeError!usize {
-    const command_len = encodeCommand(Command.List, buf);
+    var encoder = Encoder{ .buf = buf };
 
-    var encoder = Encoder{ .buf = buf[command_len..] };
+    _ = try encoder.encodeCommand(Command.List);
+
     var iterator = list_response.iterator();
     while (iterator.next()) |kv_pair| {
         std.log.debug("key: {s}", .{kv_pair.key.content});
@@ -175,7 +174,7 @@ pub fn encodeListReponse(list_response: ListResponse, buf: []u8) EncodeError!usi
         _ = try encoder.encodeString(kv_pair.value);
     }
 
-    return command_len + encoder.written;
+    return encoder.written;
 }
 
 fn commandIs(buf: []const u8, command: []const u8) bool {
@@ -195,17 +194,6 @@ pub fn parseCommand(buf: []const u8) Command {
 
 pub fn decodeCommand(buf: []const u8) !Command {
     return try std.meta.intToEnum(Command, buf[0]);
-}
-
-pub fn encodeCommand(command: Command, buf: []u8) u8 {
-    std.mem.writePackedInt(
-        u8,
-        buf,
-        0,
-        @intFromEnum(command),
-        native_endian,
-    );
-    return 1;
 }
 
 /// Parses the given buffer by assuming the first two bytes are the
@@ -279,7 +267,7 @@ fn parseWord(buf: []const u8, out_buf: []u8) !struct { usize, usize } {
 pub fn createGetReq(message: []const u8, wbuf: []u8) !usize {
     const out_buf = wbuf[len_header_size..];
     var m_len: usize = 0;
-    m_len += encodeCommand(Command.Get, out_buf);
+    m_len += try encodeCommand(Command.Get, out_buf);
 
     // Parse the key back into the input buffer
     const key_len, _ = try parseWord(message, out_buf[m_len..]);
@@ -293,7 +281,7 @@ pub fn createGetReq(message: []const u8, wbuf: []u8) !usize {
 pub fn createSetReq(message: []const u8, wbuf: []u8) !usize {
     const out_buf = wbuf[len_header_size..];
     var m_len: usize = 0;
-    m_len += encodeCommand(Command.Set, out_buf);
+    m_len += try encodeCommand(Command.Set, out_buf);
 
     const key_len, const bytes_read = try parseWord(message, out_buf[m_len..]);
     m_len += key_len;
@@ -311,7 +299,7 @@ pub fn createSetReq(message: []const u8, wbuf: []u8) !usize {
 pub fn createDelReq(message: []const u8, wbuf: []u8) !usize {
     const out_buf = wbuf[len_header_size..];
     var m_len: usize = 0;
-    m_len += encodeCommand(Command.Delete, out_buf);
+    m_len += try encodeCommand(Command.Delete, out_buf);
 
     // Parse the key back into the input buffer
     const key_len, _ = try parseWord(message, out_buf[m_len..]);
@@ -326,9 +314,14 @@ pub fn createListReq(message: []const u8, wbuf: []u8) !usize {
     _ = message;
     const out_buf = wbuf[len_header_size..];
     var m_len: usize = 0;
-    m_len += encodeCommand(Command.List, out_buf);
+    m_len += try encodeCommand(Command.List, out_buf);
     m_len += try writeHeader(m_len, wbuf);
     return m_len;
+}
+
+fn encodeCommand(command: Command, buf: []u8) !usize {
+    var encoder = Encoder{ .buf = buf };
+    return try encoder.encodeCommand(command);
 }
 
 fn writeHeader(message_len: usize, buf: []u8) serialization.EncodeError!usize {

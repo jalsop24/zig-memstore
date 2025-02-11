@@ -83,6 +83,14 @@ pub const Encoder = struct {
         return written;
     }
 
+    pub fn encodeCommand(self: *Self, command: types.Command) EncodeError!usize {
+        return self.update(try encodeGenericInteger(
+            @typeInfo(types.Command).@"enum".tag_type,
+            @intFromEnum(command),
+            self.w_buf(),
+        ));
+    }
+
     inline fn w_buf(self: *Self) []u8 {
         return self.buf[self.written..];
     }
