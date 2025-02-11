@@ -2,9 +2,10 @@ const std = @import("std");
 const builtin = @import("builtin");
 const types = @import("types.zig");
 const serialization = @import("serialization.zig");
-const serialize = serialization.serialize;
+
+const Encoder = serialization.Encoder;
+
 const encodeGenericInteger = serialization.encodeGenericInteger;
-const encodeString = serialization.encodeString;
 
 const native_endian = builtin.cpu.arch.endian();
 
@@ -94,13 +95,14 @@ pub fn decodeGetResponse(buf: []const u8) !GetResponse {
 }
 
 pub fn encodeGetResponse(get_response: GetResponse, buf: []u8) EncodeError!usize {
-    var written: usize = 0;
-    written += encodeCommand(Command.Get, buf[written..]);
-    written += try encodeString(get_response.key, buf[written..]);
+    const command_len = encodeCommand(Command.Get, buf);
+
+    var encoder = Encoder{ .buf = buf[command_len..] };
+    _ = try encoder.encodeString(get_response.key);
     if (get_response.value) |value_string| {
-        written += try encodeString(value_string, buf[written..]);
+        _ = try encoder.encodeString(value_string);
     }
-    return written;
+    return command_len + encoder.written;
 }
 
 pub const SetResponse = struct {
@@ -118,12 +120,13 @@ pub fn decodeSetResponse(buf: []const u8) !SetResponse {
 }
 
 pub fn encodeSetResponse(set_response: SetResponse, buf: []u8) EncodeError!usize {
-    var written: usize = 0;
-    written += encodeCommand(Command.Set, buf[written..]);
-    written += try encodeString(set_response.key, buf[written..]);
-    written += try encodeString(set_response.value, buf[written..]);
+    const command_len = encodeCommand(Command.Set, buf);
 
-    return written;
+    var encoder = Encoder{ .buf = buf[command_len..] };
+    _ = try encoder.encodeString(set_response.key);
+    _ = try encoder.encodeString(set_response.value);
+
+    return command_len + encoder.written;
 }
 
 const DeleteResponse = struct {
@@ -136,10 +139,11 @@ pub fn decodeDeleteResponse(buf: []const u8) !DeleteResponse {
 }
 
 pub fn encodeDeleteResponse(delete_response: DeleteResponse, response_buf: []u8) EncodeError!usize {
-    var written: usize = 0;
-    written += encodeCommand(Command.Delete, response_buf[written..]);
-    written += try encodeString(delete_response.key, response_buf[written..]);
-    return written;
+    const command_len = encodeCommand(Command.Delete, response_buf);
+
+    var encoder = Encoder{ .buf = response_buf[command_len..] };
+    _ = try encoder.encodeString(delete_response.key);
+    return command_len + encoder.written;
 }
 
 const ListResponse = struct {
@@ -176,21 +180,17 @@ pub fn decodeListResponse(buf: []const u8, allocator: std.mem.Allocator) !ListRe
 }
 
 pub fn encodeListReponse(list_response: ListResponse, buf: []u8) EncodeError!usize {
-    var written: usize = 0;
-    written += encodeCommand(Command.List, buf[written..]);
+    const command_len = encodeCommand(Command.List, buf);
 
+    var encoder = Encoder{ .buf = buf[command_len..] };
     var iterator = list_response.iterator();
     while (iterator.next()) |kv_pair| {
-        const key = kv_pair.key;
-        const value = kv_pair.value;
-
-        std.log.debug("key: {s}", .{key.content});
-
-        written += try encodeString(key, buf[written..]);
-        written += try encodeString(value, buf[written..]);
+        std.log.debug("key: {s}", .{kv_pair.key.content});
+        _ = try encoder.encodeString(kv_pair.key);
+        _ = try encoder.encodeString(kv_pair.value);
     }
 
-    return written;
+    return command_len + encoder.written;
 }
 
 fn commandIs(buf: []const u8, command: []const u8) bool {
@@ -284,9 +284,9 @@ fn parseWord(buf: []const u8, out_buf: []u8) !struct { usize, usize } {
         "'{s}' start = {d}, end = {d}, buf.len = {d}",
         .{ buf[start..end], start, end, buf.len },
     );
-    const total_written = try encodeString(
+    var encoder = Encoder{ .buf = out_buf };
+    const total_written = try encoder.encodeString(
         .{ .content = buf[start..end] },
-        out_buf,
     );
     return .{ total_written, end };
 }
