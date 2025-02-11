@@ -1,12 +1,17 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const types = @import("types.zig");
+const serialization = @import("serialization.zig");
+const serialize = serialization.serialize;
+const encodeGenericInteger = serialization.encodeGenericInteger;
+const encodeString = serialization.encodeString;
 
 const native_endian = builtin.cpu.arch.endian();
 
+pub const k_max_msg: usize = 4096;
+
 pub const MessageLen = u32;
 pub const len_header_size: u8 = @sizeOf(MessageLen);
-pub const k_max_msg: usize = 4096;
 
 pub const StringLen = u16;
 pub const STR_LEN_BYTES = @sizeOf(StringLen);
@@ -34,22 +39,19 @@ pub const Command = enum(CommandLen) {
     pub const LIST_LITERAL = "lst";
 };
 
-pub fn createPayload(message: []const u8, buf: []u8) PayloadCreationError!MessageLen {
-    if (message.len > k_max_msg) {
+pub fn createPayload(message: []const u8, buf: []u8) PayloadCreationError!usize {
+    const len = message.len;
+
+    if (len > k_max_msg) {
         return PayloadCreationError.MessageTooLong;
     }
 
-    const len: MessageLen = @intCast(message.len);
+    const header_size = writeHeader(@intCast(len), buf) catch {
+        return PayloadCreationError.MessageTooLong;
+    };
 
-    std.mem.writePackedInt(
-        MessageLen,
-        buf,
-        0,
-        len,
-        native_endian,
-    );
-    @memcpy(buf[len_header_size..][0..len], message);
-    return len_header_size + len;
+    @memcpy(buf[header_size..][0..len], message);
+    return @intCast(header_size + len);
 }
 
 pub fn receiveMessage(reader: std.io.AnyReader, buf: []u8) !usize {
@@ -91,8 +93,8 @@ pub fn decodeGetResponse(buf: []const u8) !GetResponse {
     };
 }
 
-pub fn encodeGetResponse(get_response: GetResponse, buf: []u8) EncodeError!MessageLen {
-    var written: MessageLen = 0;
+pub fn encodeGetResponse(get_response: GetResponse, buf: []u8) EncodeError!usize {
+    var written: usize = 0;
     written += encodeCommand(Command.Get, buf[written..]);
     written += try encodeString(get_response.key, buf[written..]);
     if (get_response.value) |value_string| {
@@ -115,11 +117,8 @@ pub fn decodeSetResponse(buf: []const u8) !SetResponse {
     };
 }
 
-pub fn encodeSetResponse(
-    set_response: SetResponse,
-    buf: []u8,
-) EncodeError!MessageLen {
-    var written: MessageLen = 0;
+pub fn encodeSetResponse(set_response: SetResponse, buf: []u8) EncodeError!usize {
+    var written: usize = 0;
     written += encodeCommand(Command.Set, buf[written..]);
     written += try encodeString(set_response.key, buf[written..]);
     written += try encodeString(set_response.value, buf[written..]);
@@ -136,8 +135,8 @@ pub fn decodeDeleteResponse(buf: []const u8) !DeleteResponse {
     return .{ .key = key };
 }
 
-pub fn encodeDeleteResponse(delete_response: DeleteResponse, response_buf: []u8) EncodeError!MessageLen {
-    var written: MessageLen = 0;
+pub fn encodeDeleteResponse(delete_response: DeleteResponse, response_buf: []u8) EncodeError!usize {
+    var written: usize = 0;
     written += encodeCommand(Command.Delete, response_buf[written..]);
     written += try encodeString(delete_response.key, response_buf[written..]);
     return written;
@@ -176,8 +175,8 @@ pub fn decodeListResponse(buf: []const u8, allocator: std.mem.Allocator) !ListRe
     };
 }
 
-pub fn encodeListReponse(list_response: ListResponse, buf: []u8) EncodeError!MessageLen {
-    var written: MessageLen = 0;
+pub fn encodeListReponse(list_response: ListResponse, buf: []u8) EncodeError!usize {
+    var written: usize = 0;
     written += encodeCommand(Command.List, buf[written..]);
 
     var iterator = list_response.iterator();
@@ -246,24 +245,6 @@ pub fn decodeString(buf: []const u8) DecodeError!types.String {
     return types.String{ .content = buf[2..][0..str_len] };
 }
 
-pub fn encodeString(string: types.String, buf: []u8) EncodeError!StringLen {
-    const len: StringLen = @intCast(string.content.len);
-
-    if (buf.len < STR_LEN_BYTES + len) {
-        return EncodeError.BufferTooSmall;
-    }
-
-    std.mem.writePackedInt(
-        StringLen,
-        buf,
-        0,
-        len,
-        native_endian,
-    );
-    @memcpy(buf[STR_LEN_BYTES..][0..len], string.content);
-    return STR_LEN_BYTES + len;
-}
-
 fn readWord(buf: []const u8) !struct { u16, usize } {
     std.log.debug("Read word from buf '{s}'", .{buf});
 
@@ -296,7 +277,7 @@ fn readWord(buf: []const u8) !struct { u16, usize } {
     return .{ @intCast(start), end + 1 };
 }
 
-fn parseWord(buf: []const u8, out_buf: []u8) !struct { StringLen, usize } {
+fn parseWord(buf: []const u8, out_buf: []u8) !struct { usize, usize } {
     const start, const end = try readWord(buf);
 
     std.log.debug(
@@ -310,9 +291,9 @@ fn parseWord(buf: []const u8, out_buf: []u8) !struct { StringLen, usize } {
     return .{ total_written, end };
 }
 
-pub fn createGetReq(message: []const u8, wbuf: []u8) !MessageLen {
+pub fn createGetReq(message: []const u8, wbuf: []u8) !usize {
     const out_buf = wbuf[len_header_size..];
-    var m_len: MessageLen = 0;
+    var m_len: usize = 0;
     m_len += encodeCommand(Command.Get, out_buf);
 
     // Parse the key back into the input buffer
@@ -320,13 +301,13 @@ pub fn createGetReq(message: []const u8, wbuf: []u8) !MessageLen {
     m_len += key_len;
     std.log.debug("Key length {}", .{key_len});
 
-    writeHeader(m_len, wbuf);
-    return len_header_size + m_len;
+    m_len += try writeHeader(m_len, wbuf);
+    return m_len;
 }
 
-pub fn createSetReq(message: []const u8, wbuf: []u8) !MessageLen {
+pub fn createSetReq(message: []const u8, wbuf: []u8) !usize {
     const out_buf = wbuf[len_header_size..];
-    var m_len: MessageLen = 0;
+    var m_len: usize = 0;
     m_len += encodeCommand(Command.Set, out_buf);
 
     const key_len, const bytes_read = try parseWord(message, out_buf[m_len..]);
@@ -338,13 +319,13 @@ pub fn createSetReq(message: []const u8, wbuf: []u8) !MessageLen {
     m_len += val_len;
     std.log.debug("Val length {}", .{val_len});
 
-    writeHeader(m_len, wbuf);
-    return len_header_size + m_len;
+    m_len += try writeHeader(m_len, wbuf);
+    return m_len;
 }
 
-pub fn createDelReq(message: []const u8, wbuf: []u8) !MessageLen {
+pub fn createDelReq(message: []const u8, wbuf: []u8) !usize {
     const out_buf = wbuf[len_header_size..];
-    var m_len: MessageLen = 0;
+    var m_len: usize = 0;
     m_len += encodeCommand(Command.Delete, out_buf);
 
     // Parse the key back into the input buffer
@@ -352,27 +333,19 @@ pub fn createDelReq(message: []const u8, wbuf: []u8) !MessageLen {
     m_len += key_len;
     std.log.debug("Key length {}", .{key_len});
 
-    writeHeader(m_len, wbuf);
-    return len_header_size + m_len;
+    m_len += try writeHeader(m_len, wbuf);
+    return m_len;
 }
 
-pub fn createListReq(message: []const u8, wbuf: []u8) !MessageLen {
+pub fn createListReq(message: []const u8, wbuf: []u8) !usize {
     _ = message;
     const out_buf = wbuf[len_header_size..];
-    var m_len: MessageLen = 0;
+    var m_len: usize = 0;
     m_len += encodeCommand(Command.List, out_buf);
-
-    // Write len_header_size byte total message length header
-    writeHeader(m_len, wbuf);
-    return len_header_size + m_len;
+    m_len += try writeHeader(m_len, wbuf);
+    return m_len;
 }
 
-fn writeHeader(message_len: MessageLen, buf: []u8) void {
-    std.mem.writePackedInt(
-        MessageLen,
-        buf[0..len_header_size],
-        0,
-        message_len,
-        native_endian,
-    );
+fn writeHeader(message_len: usize, buf: []u8) serialization.EncodeError!usize {
+    return try encodeGenericInteger(MessageLen, @intCast(message_len), buf);
 }

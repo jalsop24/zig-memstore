@@ -75,7 +75,7 @@ fn handleGetCommand(conn_state: *ConnState, buf: []u8, mapping: *Mapping) Handle
     const value = mapping.get(key);
 
     var response_buf: MessageBuffer = undefined;
-    const written: protocol.MessageLen = protocol.encodeGetResponse(.{
+    const written = protocol.encodeGetResponse(.{
         .key = key,
         .value = value,
     }, &response_buf) catch |err| switch (err) {
@@ -115,7 +115,7 @@ fn handleSetCommand(conn_state: *ConnState, buf: []u8, mapping: *Mapping) Handle
     };
 
     var response_buf: MessageBuffer = undefined;
-    const written: protocol.MessageLen = protocol.encodeSetResponse(.{
+    const written = protocol.encodeSetResponse(.{
         .key = key,
         .value = value,
     }, &response_buf) catch |err| switch (err) {

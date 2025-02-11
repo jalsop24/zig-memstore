@@ -8,7 +8,7 @@ pub const EncodeError = error{BufferTooSmall};
 const StringLen = u16;
 const ArrayLen = u16;
 
-pub fn serialize(buf: []u8, object: Object) EncodeError![]u8 {
+pub fn serialize(object: Object, buf: []u8) EncodeError![]u8 {
     var written: usize = 0;
     written += try encodeTag(object, buf[written..]);
     written += try encodeObject(object, buf[written..]);
@@ -35,34 +35,34 @@ fn encodeTag(object: Object, buf: []u8) EncodeError!usize {
     return 1;
 }
 
-fn encodeInteger(integer: types.Integer, buf: []u8) EncodeError!usize {
-    return try encodeIntegerUntagged(types.Integer, integer, buf);
+pub fn encodeInteger(integer: types.Integer, buf: []u8) EncodeError!usize {
+    return try encodeGenericInteger(types.Integer, integer, buf);
 }
 
-fn encodeDouble(double: types.Double, buf: []u8) EncodeError!usize {
-    return try encodeIntegerUntagged(u64, @bitCast(double), buf);
+pub fn encodeDouble(double: types.Double, buf: []u8) EncodeError!usize {
+    return try encodeGenericInteger(u64, @bitCast(double), buf);
 }
 
-fn encodeString(string: types.String, buf: []u8) EncodeError!usize {
+pub fn encodeString(string: types.String, buf: []u8) EncodeError!usize {
     const string_len = string.content.len;
-    const header_size = try encodeIntegerUntagged(StringLen, @intCast(string_len), buf);
+    const header_size = try encodeGenericInteger(StringLen, @intCast(string_len), buf);
 
     @memcpy(buf[header_size..][0..string_len], string.content);
     return header_size + string_len;
 }
 
-fn encodeArray(array: types.Array, buf: []u8) EncodeError!usize {
+pub fn encodeArray(array: types.Array, buf: []u8) EncodeError!usize {
     var written: usize = 0;
-    written += try encodeIntegerUntagged(ArrayLen, @intCast(array.objects.len), buf);
+    written += try encodeGenericInteger(ArrayLen, @intCast(array.objects.len), buf);
 
     for (array.objects) |object| {
-        const output = try serialize(buf[written..], object);
+        const output = try serialize(object, buf[written..]);
         written += output.len;
     }
     return written;
 }
 
-fn encodeIntegerUntagged(comptime T: type, integer: T, buf: []u8) EncodeError!usize {
+pub fn encodeGenericInteger(comptime T: type, integer: T, buf: []u8) EncodeError!usize {
     const int_size = @sizeOf(T);
     try ensureBufferLength(buf, int_size);
     std.mem.writePackedInt(
@@ -83,19 +83,19 @@ test "serializers" {
     var buf: [30]u8 = undefined;
 
     const nil_object = Object{ .nil = undefined };
-    const nil_output = try serialize(&buf, nil_object);
+    const nil_output = try serialize(nil_object, &buf);
     try std.testing.expectEqual(1, nil_output.len);
     try std.testing.expectEqualStrings(&.{0}, nil_output);
 
     const int_object = Object{ .integer = 20 };
-    const int_output = try serialize(&buf, int_object);
+    const int_output = try serialize(int_object, &buf);
     // 1 byte - tag
     // 8 bytes - u64
     try std.testing.expectEqual(9, int_output.len);
     try std.testing.expectEqualStrings(&.{ 1, 20, 0, 0, 0, 0, 0, 0, 0 }, int_output);
 
     const double_object = Object{ .double = 12.5 };
-    const double_output = try serialize(&buf, double_object);
+    const double_output = try serialize(double_object, &buf);
     // 1 byte - tag
     // 8 bytes - f64
     try std.testing.expectEqual(9, int_output.len);
@@ -103,7 +103,7 @@ test "serializers" {
     try std.testing.expectEqualStrings(&.{ 2, 0, 0, 0, 0, 0, 0, 0x29, 0x40 }, double_output);
 
     const string_object = Object{ .string = .{ .content = "hello" } };
-    const string_output = try serialize(&buf, string_object);
+    const string_output = try serialize(string_object, &buf);
     // 1 byte - tag
     // 2 bytes - string len
     // 5 bytes string
@@ -114,7 +114,7 @@ test "serializers" {
     const array_object = Object{ .array = .{
         .objects = &objects,
     } };
-    const array_output = try serialize(&buf, array_object);
+    const array_output = try serialize(array_object, &buf);
     // 1 byte - tag
     // 2 bytes - array len
     // 27 = 3 * 9 = 3 * int objects

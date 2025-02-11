@@ -114,7 +114,7 @@ pub fn main() !void {
     while (true) {
         _ = try stdout.write(">>> ");
         var message = try cli_reader.readUntilDelimiterOrEof(&input_buf, DELIMITER) orelse return;
-        var wlen: u32 = 0;
+        var wlen: usize = 0;
 
         std.log.debug("received message '{s}'", .{message});
 
