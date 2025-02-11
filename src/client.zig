@@ -3,11 +3,17 @@ const std = @import("std");
 const protocol = @import("protocol.zig");
 const cli = @import("cli.zig");
 const types = @import("types.zig");
+const serialization = @import("serialization.zig");
 
 const LogLevel = std.log.Level;
 
 const Command = types.Command;
 const COMMAND_LEN_BYTES = types.COMMAND_LEN_BYTES;
+
+const len_header_size = protocol.len_header_size;
+const encodeHeader = protocol.encodeHeader;
+
+const Encoder = serialization.Encoder;
 
 pub const std_options: std.Options = .{
     .log_level = LogLevel.debug,
@@ -127,16 +133,16 @@ pub fn main() !void {
 
         switch (parseCommand(message)) {
             .Get => {
-                wlen = try protocol.createGetReq(message[3..], &wbuf);
+                wlen = try createGetReq(message[3..], &wbuf);
             },
             .Set => {
-                wlen = try protocol.createSetReq(message[3..], &wbuf);
+                wlen = try createSetReq(message[3..], &wbuf);
             },
             .Delete => {
-                wlen = try protocol.createDelReq(message[3..], &wbuf);
+                wlen = try createDelReq(message[3..], &wbuf);
             },
             .List => {
-                wlen = try protocol.createListReq(message[3..], &wbuf);
+                wlen = try createListReq(message[3..], &wbuf);
             },
             .Unknown => {
                 std.log.info("Unknown command", .{});
@@ -173,4 +179,110 @@ fn parseCommand(buf: []const u8) Command {
 
 fn commandIs(buf: []const u8, command: []const u8) bool {
     return std.mem.eql(u8, buf, command);
+}
+
+fn readWord(buf: []const u8) !struct { u16, usize } {
+    std.log.debug("Read word from buf '{s}'", .{buf});
+
+    if (buf.len == 0) {
+        return .{ 0, 0 };
+    }
+
+    var start: usize = 0;
+    // Consume all leading whitespace
+    for (0..buf.len) |i| {
+        std.log.debug("buf[{1d}] '{0c}' ({0x})", .{ buf[i], i });
+        if (buf[i] != ' ') {
+            start = @intCast(i);
+            break;
+        }
+    }
+    // What if that loop gets all the way to the end of the buffer?
+    var end: usize = start;
+    for (start..buf.len) |i| {
+        std.log.debug("buf[{1d}] '{0c}' ({0x})", .{ buf[i], i });
+        end = i;
+        if (buf[i] == ' ' or buf[i] == '\n') {
+            end -= 1;
+            break;
+        }
+
+        if (i - start > 2 ^ 16 - 1) return error.WordTooLong;
+    }
+
+    return .{ @intCast(start), end + 1 };
+}
+
+fn parseWord(buf: []const u8, out_buf: []u8) !struct { usize, usize } {
+    const start, const end = try readWord(buf);
+
+    std.log.debug(
+        "'{s}' start = {d}, end = {d}, buf.len = {d}",
+        .{ buf[start..end], start, end, buf.len },
+    );
+    var encoder = Encoder{ .buf = out_buf };
+    const total_written = try encoder.encodeString(
+        .{ .content = buf[start..end] },
+    );
+    return .{ total_written, end };
+}
+
+pub fn createGetReq(message: []const u8, wbuf: []u8) !usize {
+    const out_buf = wbuf[len_header_size..];
+    var m_len: usize = 0;
+    m_len += try encodeCommand(Command.Get, out_buf);
+
+    // Parse the key back into the input buffer
+    const key_len, _ = try parseWord(message, out_buf[m_len..]);
+    m_len += key_len;
+    std.log.debug("Key length {}", .{key_len});
+
+    m_len += try encodeHeader(m_len, wbuf);
+    return m_len;
+}
+
+pub fn createSetReq(message: []const u8, wbuf: []u8) !usize {
+    const out_buf = wbuf[len_header_size..];
+    var m_len: usize = 0;
+    m_len += try encodeCommand(Command.Set, out_buf);
+
+    const key_len, const bytes_read = try parseWord(message, out_buf[m_len..]);
+    m_len += key_len;
+    std.log.debug("Key length {}", .{key_len});
+    std.log.debug("Bytes read {}", .{bytes_read});
+
+    const val_len, _ = try parseWord(message[bytes_read..], out_buf[m_len..]);
+    m_len += val_len;
+    std.log.debug("Val length {}", .{val_len});
+
+    m_len += try encodeHeader(m_len, wbuf);
+    return m_len;
+}
+
+pub fn createDelReq(message: []const u8, wbuf: []u8) !usize {
+    const out_buf = wbuf[len_header_size..];
+    var m_len: usize = 0;
+    m_len += try encodeCommand(Command.Delete, out_buf);
+
+    // Parse the key back into the input buffer
+    const key_len, _ = try parseWord(message, out_buf[m_len..]);
+    m_len += key_len;
+    std.log.debug("Key length {}", .{key_len});
+
+    m_len += try encodeHeader(m_len, wbuf);
+    return m_len;
+}
+
+pub fn createListReq(message: []const u8, wbuf: []u8) !usize {
+    _ = message;
+    const out_buf = wbuf[len_header_size..];
+    var m_len: usize = 0;
+    m_len += try encodeCommand(Command.List, out_buf);
+    m_len += try encodeHeader(m_len, wbuf);
+    return m_len;
+}
+
+fn encodeCommand(command: Command, buf: []u8) !usize {
+    var encoder = Encoder{ .buf = buf };
+    return try encoder.encodeCommand(command);
 }
