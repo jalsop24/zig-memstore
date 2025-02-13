@@ -6,6 +6,7 @@ const serialization = @import("serialization.zig");
 const Command = types.Command;
 
 const Encoder = serialization.Encoder;
+const Decoder = serialization.Decoder;
 
 const encodeGenericInteger = serialization.encodeGenericInteger;
 
@@ -24,7 +25,7 @@ pub const PayloadCreationError = error{MessageTooLong};
 pub const MessageBuffer = [len_header_size + k_max_msg]u8;
 
 pub const EncodeError = serialization.EncodeError;
-pub const DecodeError = error{InvalidString};
+pub const DecodeError = serialization.DecodeError;
 
 pub fn createPayload(message: []const u8, buf: []u8) PayloadCreationError!usize {
     const len = message.len;
@@ -68,10 +69,18 @@ pub const GetResponse = struct {
 };
 
 pub fn decodeGetResponse(buf: []const u8) !GetResponse {
-    const key = try decodeString(buf);
-    const value: ?types.String = decodeString(buf[STR_LEN_BYTES + key.content.len ..]) catch |err| blk: {
+    var decoder = Decoder{
+        .allocator = undefined,
+        .buf = buf,
+    };
+    const key = try decoder.decodeString();
+    const value: ?types.String = decoder.decodeString() catch |err| blk: {
         switch (err) {
-            DecodeError.InvalidString => break :blk null,
+            // Expect the raw response buffer to be too small in the case where there is no value returned
+            // In the future this should be replaced with decodeObject and using the Nil object to signal
+            // no value
+            DecodeError.BufferTooSmall => break :blk null,
+            else => return err,
         }
     };
     return .{
@@ -97,8 +106,9 @@ pub const SetResponse = struct {
 };
 
 pub fn decodeSetResponse(buf: []const u8) !SetResponse {
-    const key = try decodeString(buf);
-    const value = try decodeString(buf[STR_LEN_BYTES + key.content.len ..]);
+    var decoder = Decoder{ .allocator = undefined, .buf = buf };
+    const key = try decoder.decodeString();
+    const value = try decoder.decodeString();
     return .{
         .key = key,
         .value = value,
@@ -119,7 +129,8 @@ const DeleteResponse = struct {
 };
 
 pub fn decodeDeleteResponse(buf: []const u8) !DeleteResponse {
-    const key = try decodeString(buf);
+    var decoder = Decoder{ .allocator = undefined, .buf = buf };
+    const key = try decoder.decodeString();
     return .{ .key = key };
 }
 
@@ -141,13 +152,11 @@ const ListResponse = struct {
 
 pub fn decodeListResponse(buf: []const u8, allocator: std.mem.Allocator) !ListResponse {
     var mapping = try types.Mapping.init(allocator);
+    var decoder = Decoder{ .allocator = undefined, .buf = buf };
 
-    var read: usize = 0;
-    while (read < buf.len) {
-        const key = try decodeString(buf[read..]);
-        read += STR_LEN_BYTES + key.content.len;
-        const value = try decodeString(buf[read..]);
-        read += STR_LEN_BYTES + value.content.len;
+    while (decoder.read < buf.len) {
+        const key = try decoder.decodeString();
+        const value = try decoder.decodeString();
 
         mapping.put(key, value) catch |err| switch (err) {
             error.OutOfMemory => {
@@ -187,7 +196,7 @@ pub fn decodeCommand(buf: []const u8) !Command {
 /// from the buffer
 pub fn decodeString(buf: []const u8) DecodeError!types.String {
     if (buf.len < 2) {
-        return DecodeError.InvalidString;
+        return DecodeError.BufferTooSmall;
     }
 
     const str_len = std.mem.readPackedInt(
@@ -198,7 +207,7 @@ pub fn decodeString(buf: []const u8) DecodeError!types.String {
     );
 
     if (buf.len < STR_LEN_BYTES + str_len) {
-        return DecodeError.InvalidString;
+        return DecodeError.BufferTooSmall;
     }
 
     return types.String{ .content = buf[2..][0..str_len] };

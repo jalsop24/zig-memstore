@@ -14,7 +14,6 @@ const HandleRequestError = error{InvalidRequest} || protocol.PayloadCreationErro
 const Command = types.Command;
 const COMMAND_LEN_BYTES = types.COMMAND_LEN_BYTES;
 
-const DecodeError = protocol.DecodeError;
 const EncodeError = protocol.EncodeError;
 
 pub fn parseRequest(conn_state: *ConnState, buf: []u8, mapping: *Mapping) void {
@@ -66,11 +65,9 @@ fn handleGetCommand(conn_state: *ConnState, buf: []u8, mapping: *Mapping) Handle
         return HandleRequestError.InvalidRequest;
     }
 
-    const key = protocol.decodeString(buf) catch |err| switch (err) {
-        DecodeError.InvalidString => {
-            std.log.debug("Failed to parse key {s}", .{buf});
-            return HandleRequestError.InvalidRequest;
-        },
+    const key = protocol.decodeString(buf) catch {
+        std.log.debug("Failed to parse key {s}", .{buf});
+        return HandleRequestError.InvalidRequest;
     };
 
     std.log.info("Get key '{s}'", .{key.content});
@@ -95,20 +92,16 @@ fn handleSetCommand(conn_state: *ConnState, buf: []u8, mapping: *Mapping) Handle
         return HandleRequestError.InvalidRequest;
     }
 
-    const key = protocol.decodeString(buf) catch |err| switch (err) {
-        DecodeError.InvalidString => {
-            std.log.debug("Failed to parse key {s}", .{buf});
-            return HandleRequestError.InvalidRequest;
-        },
+    const key = protocol.decodeString(buf) catch {
+        std.log.debug("Failed to parse key {s}", .{buf});
+        return HandleRequestError.InvalidRequest;
     };
     std.log.info("Key {s}", .{key.content});
 
     const value_buf = buf[key.content.len + protocol.STR_LEN_BYTES ..];
-    const value = protocol.decodeString(value_buf) catch |err| switch (err) {
-        DecodeError.InvalidString => {
-            std.log.debug("Failed to parse value {s}", .{value_buf});
-            return HandleRequestError.InvalidRequest;
-        },
+    const value = protocol.decodeString(value_buf) catch {
+        std.log.debug("Failed to parse value {s}", .{value_buf});
+        return HandleRequestError.InvalidRequest;
     };
 
     mapping.put(key, value) catch {
@@ -135,8 +128,8 @@ fn handleDeleteCommand(conn_state: *ConnState, buf: []const u8, mapping: *Mappin
         return HandleRequestError.InvalidRequest;
     }
 
-    const key = protocol.decodeString(buf) catch |err| switch (err) {
-        DecodeError.InvalidString => return HandleRequestError.InvalidRequest,
+    const key = protocol.decodeString(buf) catch {
+        return HandleRequestError.InvalidRequest;
     };
 
     mapping.remove(key);
