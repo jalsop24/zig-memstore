@@ -209,6 +209,14 @@ fn ensureBufferLength(buf: []u8, len: usize) EncodeError!void {
 test "serializers" {
     var buf: [30]u8 = undefined;
 
+    var encoder = Encoder{ .buf = &buf };
+    _ = try encoder.encodeCommand(.Get);
+    _ = try encoder.encodeCommand(.Set);
+    _ = try encoder.encodeCommand(.Delete);
+    _ = try encoder.encodeCommand(.List);
+    const command_output = encoder.buf[0..encoder.written];
+    try std.testing.expectEqualStrings(&.{ 1, 2, 3, 4 }, command_output);
+
     const nil_object = Object{ .nil = undefined };
     const nil_output = try serialize(nil_object, &buf);
     try std.testing.expectEqual(1, nil_output.len);
