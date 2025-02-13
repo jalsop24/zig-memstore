@@ -4,9 +4,12 @@ const types = @import("types.zig");
 const Object = types.Object;
 
 pub const EncodeError = error{BufferTooSmall};
+pub const DecodeError = error{ InvalidType, BufferTooSmall, OutOfMemory };
 
 const StringLen = u16;
 const ArrayLen = u16;
+
+const ENDIAN = std.builtin.Endian.little;
 
 pub const Encoder = struct {
     buf: []u8,
@@ -115,9 +118,88 @@ pub fn encodeGenericInteger(comptime T: type, integer: T, buf: []u8) EncodeError
         buf,
         0,
         integer,
-        .little,
+        ENDIAN,
     );
     return int_size;
+}
+
+pub const Decoder = struct {
+    allocator: std.mem.Allocator,
+    buf: []const u8,
+    read: usize = 0,
+
+    const Self = @This();
+
+    pub fn decodeObject(self: *Self) DecodeError!Object {
+        const tag = try self.decodeTag();
+
+        switch (tag) {
+            .nil => return Object{ .nil = .{} },
+            .integer => return Object{ .integer = try self.decodeInteger() },
+            .double => return Object{ .double = try self.decodeDouble() },
+            .string => return Object{ .string = try self.decodeString() },
+            .array => return Object{ .array = try self.decodeArray() },
+        }
+    }
+
+    pub fn decodeTag(self: *Self) DecodeError!types.Tag {
+        const int_type = @typeInfo(types.Tag).@"enum".tag_type;
+        const int = try self.decodeGenericInteger(int_type);
+        return std.meta.intToEnum(types.Tag, int) catch return DecodeError.InvalidType;
+    }
+
+    pub fn decodeInteger(self: *Self) DecodeError!types.Integer {
+        return self.decodeGenericInteger(types.Integer);
+    }
+
+    pub fn decodeDouble(self: *Self) DecodeError!types.Double {
+        const int = try self.decodeGenericInteger(u64);
+        return @bitCast(int);
+    }
+
+    pub fn decodeString(self: *Self) DecodeError!types.String {
+        const string_len = try self.decodeGenericInteger(StringLen);
+        try self.ensureBufferLength(string_len);
+
+        const content = self.r_buf()[0..string_len];
+        self.read += string_len;
+
+        return types.String{ .content = content };
+    }
+
+    pub fn decodeArray(self: *Self) DecodeError!types.Array {
+        const array_len = try self.decodeGenericInteger(ArrayLen);
+        const objects = self.allocator.alloc(Object, array_len) catch return DecodeError.OutOfMemory;
+        for (0..array_len) |i| {
+            objects[i] = try self.decodeObject();
+        }
+
+        return types.Array{ .objects = objects };
+    }
+
+    pub fn decodeGenericInteger(self: *Self, comptime T: type) DecodeError!T {
+        try self.ensureBufferLength(@sizeOf(T));
+
+        const int = std.mem.readPackedInt(T, self.r_buf(), 0, ENDIAN);
+        self.read += @sizeOf(T);
+        return int;
+    }
+
+    fn r_buf(self: *Self) []const u8 {
+        return self.buf[self.read..];
+    }
+
+    fn ensureBufferLength(self: *Self, len: usize) DecodeError!void {
+        if (self.r_buf().len < len) return DecodeError.BufferTooSmall;
+    }
+};
+
+pub fn deserialize(allocator: std.mem.Allocator, buf: []u8) DecodeError!Object {
+    var decoder = Decoder{
+        .allocator = allocator,
+        .buf = buf,
+    };
+    return try decoder.decodeObject();
 }
 
 fn ensureBufferLength(buf: []u8, len: usize) EncodeError!void {
@@ -201,4 +283,56 @@ test "serializers" {
         0,
         0,
     }, array_output);
+}
+
+test "deserializers" {
+    const allocator = std.testing.allocator;
+    var arena = std.heap.ArenaAllocator.init(allocator);
+    defer arena.deinit();
+
+    var buf_array: [100]u8 = undefined;
+    const buf = &buf_array;
+
+    const objects = [_]Object{
+        Object{ .nil = .{} },
+        Object{ .integer = 12 },
+        Object{ .double = 25.32 },
+        Object{ .string = .{ .content = "abcdefg h" } },
+        Object{ .array = .{ .objects = &.{
+            Object{ .integer = 12 },
+            Object{ .double = 25.32 },
+            Object{ .double = 34.56 },
+        } } },
+    };
+
+    for (objects) |object| {
+        const encoded_object = try serialize(object, buf);
+        const decoded_object = try deserialize(arena.allocator(), encoded_object);
+        try expectEqualObjects(object, decoded_object);
+    }
+}
+
+fn expectEqualObjects(expected: Object, actual: Object) !void {
+    try std.testing.expectEqualStrings(@tagName(expected), @tagName(actual));
+    switch (expected) {
+        .nil => {},
+        .integer => |integer| try std.testing.expectEqual(
+            integer,
+            actual.integer,
+        ),
+        .double => |double| try std.testing.expectEqual(
+            double,
+            actual.double,
+        ),
+        .string => |string| try std.testing.expectEqualStrings(
+            string.content,
+            actual.string.content,
+        ),
+        .array => |expected_array| {
+            try std.testing.expectEqual(expected_array.objects.len, actual.array.objects.len);
+            for (expected_array.objects, actual.array.objects) |expected_element, actual_element| {
+                try expectEqualObjects(expected_element, actual_element);
+            }
+        },
+    }
 }

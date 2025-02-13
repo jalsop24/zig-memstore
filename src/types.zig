@@ -6,15 +6,23 @@ const Allocator = std.mem.Allocator;
 pub const Mapping = HashMap;
 pub const ConnMapping = std.AutoArrayHashMap(std.posix.socket_t, *NetConn);
 
-pub const Object = union(enum(u8)) {
-    nil: Nil = 0,
-    integer: Integer = 1,
-    double: Double = 2,
-    string: String = 3,
-    array: Array = 4,
+pub const Tag = enum(u8) {
+    nil = 0,
+    integer = 1,
+    double = 2,
+    string = 3,
+    array = 4,
 };
 
-pub const Nil = void;
+pub const Object = union(Tag) {
+    nil: Nil,
+    integer: Integer,
+    double: Double,
+    string: String,
+    array: Array,
+};
+
+pub const Nil = struct {};
 
 pub const Integer = u64;
 
