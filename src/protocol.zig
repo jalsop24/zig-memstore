@@ -232,28 +232,6 @@ pub fn encodeUnknownResponse(unknown_response: UnknownResponse, buf: []u8) usize
     return unknown_response.content.len;
 }
 
-/// Parses the given buffer by assuming the first two bytes are the
-/// length of the string as a u16, then reads the next 'length' bytes
-/// from the buffer
-pub fn decodeString(buf: []const u8) DecodeError!types.String {
-    if (buf.len < 2) {
-        return DecodeError.BufferTooSmall;
-    }
-
-    const str_len = std.mem.readPackedInt(
-        StringLen,
-        buf[0..2],
-        0,
-        native_endian,
-    );
-
-    if (buf.len < STR_LEN_BYTES + str_len) {
-        return DecodeError.BufferTooSmall;
-    }
-
-    return types.String{ .content = buf[2..][0..str_len] };
-}
-
 pub fn encodeHeader(message_len: usize, buf: []u8) EncodeError!usize {
     return try encodeGenericInteger(MessageLen, @intCast(message_len), buf);
 }
