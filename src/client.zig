@@ -19,26 +19,17 @@ pub const std_options: std.Options = .{
     .log_level = LogLevel.debug,
 };
 
-fn handleResponse(buf: []const u8) !void {
-    const command = protocol.decodeCommand(buf) catch |err| switch (err) {
-        std.meta.IntToEnumError.InvalidEnumTag => {
-            std.log.info("{s}", .{buf});
-            return;
-        },
-    };
-
-    const body = buf[COMMAND_LEN_BYTES..];
-    switch (command) {
-        Command.Get => try handleGetResponse(body),
-        Command.Set => try handleSetResponse(body),
-        Command.Delete => try handleDeleteResponse(body),
-        Command.List => try handleListResponse(body),
-        Command.Unknown => std.log.info("{s}", .{buf}),
+fn handleResponse(response: protocol.Response) !void {
+    switch (response) {
+        .Get => |get_response| try handleGetResponse(get_response),
+        .Set => |set_response| try handleSetResponse(set_response),
+        .Delete => |delete_response| try handleDeleteResponse(delete_response),
+        .List => |list_response| try handleListResponse(list_response),
+        .Unknown => |unknown_response| handleUnknownResponse(unknown_response),
     }
 }
 
-fn handleGetResponse(buf: []const u8) !void {
-    const get_response = try protocol.decodeGetResponse(buf);
+fn handleGetResponse(get_response: protocol.GetResponse) !void {
     const key = get_response.key;
 
     if (get_response.value) |value| {
@@ -49,29 +40,18 @@ fn handleGetResponse(buf: []const u8) !void {
     std.log.info("Get response '{0s}' -> null", .{key.content});
 }
 
-fn handleSetResponse(buf: []const u8) !void {
-    const set_response = try protocol.decodeSetResponse(buf);
+fn handleSetResponse(set_response: protocol.SetResponse) !void {
     const key = set_response.key;
     const value = set_response.value;
-
     std.log.info("Set response '{0s}' = '{1s}'", .{ key.content, value.content });
 }
 
-fn handleDeleteResponse(buf: []const u8) !void {
-    const delete_response = try protocol.decodeDeleteResponse(buf);
+fn handleDeleteResponse(delete_response: protocol.DeleteResponse) !void {
     const key = delete_response.key;
-
     std.log.info("Deleted '{s}'", .{key.content});
 }
 
-fn handleListResponse(buf: []const u8) !void {
-    var list_buf: [1000]u8 = undefined;
-    var fba = std.heap.FixedBufferAllocator.init(&list_buf);
-    const alloc = fba.allocator();
-
-    const list_response = try protocol.decodeListResponse(buf, alloc);
-    defer list_response.mapping.deinit();
-
+fn handleListResponse(list_response: protocol.ListResponse) !void {
     if (list_response.len == 0) {
         std.log.info("no keys", .{});
         return;
@@ -81,6 +61,10 @@ fn handleListResponse(buf: []const u8) !void {
     while (iter.next()) |kv_pair| {
         std.log.info("'{0s}' = '{1s}'", .{ kv_pair.key.content, kv_pair.value.content });
     }
+}
+
+fn handleUnknownResponse(response: protocol.UnknownResponse) void {
+    std.log.info("{s}", .{response.content});
 }
 
 pub fn main() !void {
@@ -159,9 +143,13 @@ pub fn main() !void {
 
         var rbuf: [protocol.k_max_msg]u8 = undefined;
         const len = try protocol.receiveMessage(stream.reader().any(), &rbuf);
-        const response = rbuf[0..len];
 
-        std.log.info("Received from server '{0s}' ({0x})", .{response});
+        var arena = std.heap.ArenaAllocator.init(allocator);
+        defer arena.deinit();
+
+        const response = try protocol.decodeResponse(arena.allocator(), rbuf[0..len]);
+
+        std.log.info("Received from server '{any}'", .{response});
         try handleResponse(response);
     }
 }

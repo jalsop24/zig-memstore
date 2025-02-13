@@ -191,7 +191,7 @@ pub const Decoder = struct {
         return int;
     }
 
-    fn r_buf(self: *Self) []const u8 {
+    pub inline fn r_buf(self: *Self) []const u8 {
         return self.buf[self.read..];
     }
 

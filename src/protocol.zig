@@ -1,7 +1,9 @@
 const std = @import("std");
 const builtin = @import("builtin");
+
 const types = @import("types.zig");
 const serialization = @import("serialization.zig");
+const requests = @import("requests.zig");
 
 const Command = types.Command;
 
@@ -26,6 +28,23 @@ pub const MessageBuffer = [len_header_size + k_max_msg]u8;
 
 pub const EncodeError = serialization.EncodeError;
 pub const DecodeError = serialization.DecodeError;
+
+pub const decodeRequest = requests.decodeRequest;
+pub const Request = requests.Request;
+
+pub const GetRequest = requests.GetRequest;
+pub const SetRequest = requests.SetRequest;
+pub const DeleteRequest = requests.DeleteRequest;
+pub const ListRequest = requests.ListRequest;
+pub const UnknownRequest = requests.UnknownRequest;
+
+pub const Response = union(Command) {
+    Get: GetResponse,
+    Set: SetResponse,
+    Delete: DeleteResponse,
+    List: ListResponse,
+    Unknown: UnknownResponse,
+};
 
 pub fn createPayload(message: []const u8, buf: []u8) PayloadCreationError!usize {
     const len = message.len;
@@ -61,6 +80,19 @@ pub fn receiveMessage(reader: std.io.AnyReader, buf: []u8) !usize {
     }
     const m_read = try reader.read(buf[0..m_len]);
     return m_read;
+}
+
+pub fn decodeResponse(allocator: std.mem.Allocator, buf: []const u8) DecodeError!Response {
+    var decoder = Decoder{ .allocator = undefined, .buf = buf };
+    const command = try decoder.decodeCommand();
+
+    switch (command) {
+        .Get => return Response{ .Get = try decodeGetResponse(decoder.r_buf()) },
+        .Set => return Response{ .Set = try decodeSetResponse(decoder.r_buf()) },
+        .Delete => return Response{ .Delete = try decodeDeleteResponse(decoder.r_buf()) },
+        .List => return Response{ .List = try decodeListResponse(decoder.r_buf(), allocator) },
+        .Unknown => return Response{ .Unknown = try decodeUnknownResponse(decoder.r_buf()) },
+    }
 }
 
 pub const GetResponse = struct {
@@ -124,7 +156,7 @@ pub fn encodeSetResponse(set_response: SetResponse, buf: []u8) EncodeError!usize
     return encoder.written;
 }
 
-const DeleteResponse = struct {
+pub const DeleteResponse = struct {
     key: types.String,
 };
 
@@ -141,7 +173,7 @@ pub fn encodeDeleteResponse(delete_response: DeleteResponse, buf: []u8) EncodeEr
     return encoder.written;
 }
 
-const ListResponse = struct {
+pub const ListResponse = struct {
     len: usize = 0,
     mapping: *types.Mapping,
 
@@ -187,8 +219,17 @@ pub fn encodeListReponse(list_response: ListResponse, buf: []u8) EncodeError!usi
     return encoder.written;
 }
 
-pub fn decodeCommand(buf: []const u8) !Command {
-    return try std.meta.intToEnum(Command, buf[0]);
+pub const UnknownResponse = struct {
+    content: []const u8,
+};
+
+pub fn decodeUnknownResponse(buf: []const u8) DecodeError!UnknownResponse {
+    return .{ .content = buf };
+}
+
+pub fn encodeUnknownResponse(unknown_response: UnknownResponse, buf: []u8) usize {
+    @memcpy(buf[0..unknown_response.content.len], unknown_response.content);
+    return unknown_response.content.len;
 }
 
 /// Parses the given buffer by assuming the first two bytes are the

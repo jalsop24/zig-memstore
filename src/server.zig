@@ -102,24 +102,23 @@ test "req get" {
     var mapping = try Mapping.init(allocator);
     defer mapping.deinit();
 
+    var arena = std.heap.ArenaAllocator.init(allocator);
+    defer arena.deinit();
+
     var server = testing.TestServer{
         .mapping = mapping,
     };
 
-    const client = try testing.TestClient.init(allocator);
+    const client = try testing.TestClient.init(arena.allocator());
     defer client.deinit();
     client.server = &server;
 
     const response = try client.sendGetRequest("key");
 
-    std.log.debug("response = {x}", .{response});
+    std.log.debug("response = {any}", .{response});
 
-    const command = protocol.decodeCommand(response);
-    try std.testing.expectEqual(command, Command.Get);
-
-    const get_reponse = try protocol.decodeGetResponse(response[COMMAND_LEN_BYTES..]);
-    try std.testing.expectEqualStrings(get_reponse.key.content, "key");
-    try std.testing.expectEqual(get_reponse.value, null);
+    try std.testing.expectEqualStrings(response.key.content, "key");
+    try std.testing.expectEqual(response.value, null);
 }
 
 test "req set" {
@@ -127,24 +126,21 @@ test "req set" {
     var mapping = try Mapping.init(allocator);
     defer mapping.deinit();
 
+    var arena = std.heap.ArenaAllocator.init(allocator);
+    defer arena.deinit();
+
     var server = testing.TestServer{
         .mapping = mapping,
     };
 
-    const client = try testing.TestClient.init(allocator);
+    const client = try testing.TestClient.init(arena.allocator());
     defer client.deinit();
     client.server = &server;
 
     const response = try client.sendSetRequest("a 1");
 
-    std.log.debug("response = {x}", .{response});
-
-    const command = protocol.decodeCommand(response);
-    try std.testing.expectEqual(command, Command.Set);
-
-    const set_reponse = try protocol.decodeSetResponse(response[COMMAND_LEN_BYTES..]);
-    try std.testing.expectEqualStrings(set_reponse.key.content, "a");
-    try std.testing.expectEqualStrings(set_reponse.value.content, "1");
+    try std.testing.expectEqualStrings(response.key.content, "a");
+    try std.testing.expectEqualStrings(response.value.content, "1");
 }
 
 test "req del" {
@@ -152,23 +148,20 @@ test "req del" {
     var mapping = try Mapping.init(allocator);
     defer mapping.deinit();
 
+    var arena = std.heap.ArenaAllocator.init(allocator);
+    defer arena.deinit();
+
     var server = testing.TestServer{
         .mapping = mapping,
     };
 
-    const client = try testing.TestClient.init(allocator);
+    const client = try testing.TestClient.init(arena.allocator());
     defer client.deinit();
     client.server = &server;
 
     const response = try client.sendDeleteRequest("a");
 
-    std.log.debug("response = {x}", .{response});
-
-    const command = protocol.decodeCommand(response);
-    try std.testing.expectEqual(command, Command.Delete);
-
-    const delete_reponse = try protocol.decodeDeleteResponse(response[COMMAND_LEN_BYTES..]);
-    try std.testing.expectEqualStrings(delete_reponse.key.content, "a");
+    try std.testing.expectEqualStrings(response.key.content, "a");
 }
 
 test "req lst" {
@@ -176,28 +169,19 @@ test "req lst" {
     var mapping = try Mapping.init(allocator);
     defer mapping.deinit();
 
+    var arena = std.heap.ArenaAllocator.init(allocator);
+    defer arena.deinit();
+
     var server = testing.TestServer{
         .mapping = mapping,
     };
 
-    const client = try testing.TestClient.init(allocator);
+    const client = try testing.TestClient.init(arena.allocator());
     defer client.deinit();
     client.server = &server;
     {
         const response = try client.sendListRequest("");
-
-        std.log.debug("list response = {x}", .{response});
-
-        const command = try protocol.decodeCommand(response);
-        try std.testing.expectEqual(command, Command.List);
-
-        const list_response = try protocol.decodeListResponse(
-            response[COMMAND_LEN_BYTES..],
-            allocator,
-        );
-        defer list_response.mapping.deinit();
-
-        try std.testing.expect(list_response.len == 0);
+        try std.testing.expect(response.len == 0);
     }
 
     // Insert actual data into the mapping
@@ -205,19 +189,8 @@ test "req lst" {
 
     const response = try client.sendListRequest("");
 
-    std.log.debug("list response = {x}", .{response});
-
-    const command = protocol.decodeCommand(response);
-    try std.testing.expectEqual(command, Command.List);
-
-    const list_response = try protocol.decodeListResponse(
-        response[COMMAND_LEN_BYTES..],
-        allocator,
-    );
-    defer list_response.mapping.deinit();
-
-    try std.testing.expect(list_response.len == 1);
-    var iter = list_response.iterator();
+    try std.testing.expect(response.len == 1);
+    var iter = response.iterator();
     const kv_pair = iter.next().?;
     try std.testing.expectEqualStrings(kv_pair.key.content, "a");
     try std.testing.expectEqualStrings(kv_pair.value.content, "1");
