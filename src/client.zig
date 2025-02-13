@@ -19,54 +19,6 @@ pub const std_options: std.Options = .{
     .log_level = LogLevel.debug,
 };
 
-fn handleResponse(response: protocol.Response) !void {
-    switch (response) {
-        .Get => |get_response| try handleGetResponse(get_response),
-        .Set => |set_response| try handleSetResponse(set_response),
-        .Delete => |delete_response| try handleDeleteResponse(delete_response),
-        .List => |list_response| try handleListResponse(list_response),
-        .Unknown => |unknown_response| handleUnknownResponse(unknown_response),
-    }
-}
-
-fn handleGetResponse(get_response: protocol.GetResponse) !void {
-    const key = get_response.key;
-
-    if (get_response.value) |value| {
-        std.log.info("Get response '{0s}' -> '{1s}'", .{ key.content, value.content });
-        return;
-    }
-
-    std.log.info("Get response '{0s}' -> null", .{key.content});
-}
-
-fn handleSetResponse(set_response: protocol.SetResponse) !void {
-    const key = set_response.key;
-    const value = set_response.value;
-    std.log.info("Set response '{0s}' = '{1s}'", .{ key.content, value.content });
-}
-
-fn handleDeleteResponse(delete_response: protocol.DeleteResponse) !void {
-    const key = delete_response.key;
-    std.log.info("Deleted '{s}'", .{key.content});
-}
-
-fn handleListResponse(list_response: protocol.ListResponse) !void {
-    if (list_response.len == 0) {
-        std.log.info("no keys", .{});
-        return;
-    }
-
-    var iter = list_response.iterator();
-    while (iter.next()) |kv_pair| {
-        std.log.info("'{0s}' = '{1s}'", .{ kv_pair.key.content, kv_pair.value.content });
-    }
-}
-
-fn handleUnknownResponse(response: protocol.UnknownResponse) void {
-    std.log.info("{s}", .{response.content});
-}
-
 pub fn main() !void {
     var gpa_alloc = std.heap.GeneralPurposeAllocator(.{}){};
     defer std.debug.assert(gpa_alloc.deinit() == .ok);
@@ -152,6 +104,54 @@ pub fn main() !void {
         std.log.info("Received from server '{any}'", .{response});
         try handleResponse(response);
     }
+}
+
+fn handleResponse(response: protocol.Response) !void {
+    switch (response) {
+        .Get => |get_response| try handleGetResponse(get_response),
+        .Set => |set_response| try handleSetResponse(set_response),
+        .Delete => |delete_response| try handleDeleteResponse(delete_response),
+        .List => |list_response| try handleListResponse(list_response),
+        .Unknown => |unknown_response| handleUnknownResponse(unknown_response),
+    }
+}
+
+fn handleGetResponse(get_response: protocol.GetResponse) !void {
+    const key = get_response.key;
+
+    if (get_response.value) |value| {
+        std.log.info("Get response '{0s}' -> '{1s}'", .{ key.content, value.content });
+        return;
+    }
+
+    std.log.info("Get response '{0s}' -> null", .{key.content});
+}
+
+fn handleSetResponse(set_response: protocol.SetResponse) !void {
+    const key = set_response.key;
+    const value = set_response.value;
+    std.log.info("Set response '{0s}' = '{1s}'", .{ key.content, value.content });
+}
+
+fn handleDeleteResponse(delete_response: protocol.DeleteResponse) !void {
+    const key = delete_response.key;
+    std.log.info("Deleted '{s}'", .{key.content});
+}
+
+fn handleListResponse(list_response: protocol.ListResponse) !void {
+    if (list_response.len == 0) {
+        std.log.info("no keys", .{});
+        return;
+    }
+
+    var iter = list_response.iterator();
+    while (iter.next()) |kv_pair| {
+        std.log.info("'{0s}' = '{1s}'", .{ kv_pair.key.content, kv_pair.value.content });
+    }
+}
+
+fn handleUnknownResponse(response: protocol.UnknownResponse) void {
+    std.log.info("{s}", .{response.content});
 }
 
 fn parseCommand(buf: []const u8) Command {
