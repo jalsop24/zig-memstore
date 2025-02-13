@@ -148,6 +148,12 @@ pub const Decoder = struct {
         return std.meta.intToEnum(types.Tag, int) catch return DecodeError.InvalidType;
     }
 
+    pub fn decodeCommand(self: *Self) DecodeError!types.Command {
+        const int_type = @typeInfo(types.Command).@"enum".tag_type;
+        const int = try self.decodeGenericInteger(int_type);
+        return std.meta.intToEnum(types.Command, int) catch return DecodeError.InvalidType;
+    }
+
     pub fn decodeInteger(self: *Self) DecodeError!types.Integer {
         return self.decodeGenericInteger(types.Integer);
     }
@@ -300,6 +306,12 @@ test "deserializers" {
 
     var buf_array: [100]u8 = undefined;
     const buf = &buf_array;
+
+    var encoder = Encoder{ .buf = buf };
+    var decoder = Decoder{ .allocator = allocator, .buf = buf };
+    _ = try encoder.encodeCommand(.Get);
+    const command = try decoder.decodeCommand();
+    try std.testing.expectEqual(.Get, command);
 
     const objects = [_]Object{
         Object{ .nil = .{} },
