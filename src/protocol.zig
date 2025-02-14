@@ -1,5 +1,4 @@
 const std = @import("std");
-const builtin = @import("builtin");
 
 const types = @import("types.zig");
 const serialization = @import("serialization.zig");
@@ -10,17 +9,12 @@ const Command = types.Command;
 const Encoder = serialization.Encoder;
 const Decoder = serialization.Decoder;
 
-const encodeGenericInteger = serialization.encodeGenericInteger;
-
-const native_endian = builtin.cpu.arch.endian();
+pub const ENDIAN = serialization.ENDIAN;
 
 pub const k_max_msg: usize = 4096;
 
-pub const MessageLen = u32;
+pub const MessageLen = serialization.MessageLen;
 pub const len_header_size: u8 = @sizeOf(MessageLen);
-
-pub const StringLen = u16;
-pub const STR_LEN_BYTES = @sizeOf(StringLen);
 
 pub const PayloadCreationError = error{MessageTooLong};
 
@@ -30,6 +24,7 @@ pub const EncodeError = serialization.EncodeError;
 pub const DecodeError = serialization.DecodeError;
 
 pub const decodeRequest = requests.decodeRequest;
+pub const encodeRequest = requests.encodeRequest;
 pub const Request = requests.Request;
 
 pub const GetRequest = requests.GetRequest;
@@ -53,12 +48,15 @@ pub fn createPayload(message: []const u8, buf: []u8) PayloadCreationError!usize 
         return PayloadCreationError.MessageTooLong;
     }
 
-    const header_size = encodeHeader(@intCast(len), buf) catch {
+    var encoder = Encoder{ .buf = buf };
+    _ = encoder.encodeGenericInteger(MessageLen, @intCast(len)) catch {
+        return PayloadCreationError.MessageTooLong;
+    };
+    _ = encoder.encodeBytes(message) catch {
         return PayloadCreationError.MessageTooLong;
     };
 
-    @memcpy(buf[header_size..][0..len], message);
-    return @intCast(header_size + len);
+    return encoder.written;
 }
 
 pub fn receiveMessage(reader: std.io.AnyReader, buf: []u8) !usize {
@@ -72,7 +70,7 @@ pub fn receiveMessage(reader: std.io.AnyReader, buf: []u8) !usize {
         MessageLen,
         m_header,
         0,
-        native_endian,
+        ENDIAN,
     );
     if (m_len > k_max_msg) {
         std.log.info("Invalid response {}", .{m_len});
@@ -233,5 +231,6 @@ pub fn encodeUnknownResponse(unknown_response: UnknownResponse, buf: []u8) usize
 }
 
 pub fn encodeHeader(message_len: usize, buf: []u8) EncodeError!usize {
-    return try encodeGenericInteger(MessageLen, @intCast(message_len), buf);
+    var encoder = Encoder{ .buf = buf };
+    return try encoder.encodeGenericInteger(MessageLen, @intCast(message_len));
 }

@@ -113,11 +113,15 @@ test "req get" {
     defer client.deinit();
     client.server = &server;
 
-    const response = try client.sendGetRequest("key");
+    const response = (try client.sendRequest(
+        .{ .Get = .{
+            .key = .{ .content = "a_key" },
+        } },
+    )).Get;
 
     std.log.debug("response = {any}", .{response});
 
-    try std.testing.expectEqualStrings(response.key.content, "key");
+    try std.testing.expectEqualStrings(response.key.content, "a_key");
     try std.testing.expectEqual(response.value, null);
 }
 
@@ -137,7 +141,12 @@ test "req set" {
     defer client.deinit();
     client.server = &server;
 
-    const response = try client.sendSetRequest("a 1");
+    const response = (try client.sendRequest(.{
+        .Set = .{
+            .key = .{ .content = "a" },
+            .value = .{ .content = "1" },
+        },
+    })).Set;
 
     try std.testing.expectEqualStrings(response.key.content, "a");
     try std.testing.expectEqualStrings(response.value.content, "1");
@@ -159,7 +168,11 @@ test "req del" {
     defer client.deinit();
     client.server = &server;
 
-    const response = try client.sendDeleteRequest("a");
+    const response = (try client.sendRequest(.{
+        .Delete = .{
+            .key = .{ .content = "a" },
+        },
+    })).Delete;
 
     try std.testing.expectEqualStrings(response.key.content, "a");
 }
@@ -180,14 +193,14 @@ test "req lst" {
     defer client.deinit();
     client.server = &server;
     {
-        const response = try client.sendListRequest("");
+        const response = (try client.sendRequest(.{ .List = .{} })).List;
         try std.testing.expect(response.len == 0);
     }
 
     // Insert actual data into the mapping
     try mapping.put(.{ .content = "a" }, .{ .content = "1" });
 
-    const response = try client.sendListRequest("");
+    const response = (try client.sendRequest(.{ .List = .{} })).List;
 
     try std.testing.expect(response.len == 1);
     var iter = response.iterator();

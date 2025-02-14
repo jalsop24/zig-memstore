@@ -1,3 +1,5 @@
+const std = @import("std");
+
 const types = @import("types.zig");
 const serialization = @import("serialization.zig");
 
@@ -33,6 +35,21 @@ pub fn decodeRequest(buf: []const u8) DecodeError!Request {
     }
 }
 
+pub fn encodeRequest(request: Request, buf: []u8) EncodeError!usize {
+    var encoder = Encoder{ .buf = buf };
+    _ = try encoder.encodeTag(Request, request);
+
+    switch (request) {
+        .Get => |get_req| _ = try encodeGetRequest(get_req, &encoder),
+        .Set => |set_req| _ = try encodeSetRequest(set_req, &encoder),
+        .Delete => |del_req| _ = try encodeDelete(del_req, &encoder),
+        .List => encodeListRequest(),
+        .Unknown => |unknown_req| _ = try encodeUnknownRequest(unknown_req, &encoder),
+    }
+
+    return encoder.written;
+}
+
 pub const GetRequest = struct {
     key: types.String,
 };
@@ -42,8 +59,7 @@ fn decodeGetRequest(decoder: *Decoder) DecodeError!GetRequest {
     return .{ .key = key };
 }
 
-fn encodeGetRequest(get_request: GetRequest, buf: []u8) EncodeError!usize {
-    var encoder = Encoder{ .buf = buf };
+fn encodeGetRequest(get_request: GetRequest, encoder: *Encoder) EncodeError!usize {
     _ = try encoder.encodeString(get_request.key);
     return encoder.written;
 }
@@ -62,8 +78,7 @@ fn decodeSetRequest(decoder: *Decoder) DecodeError!SetRequest {
     };
 }
 
-fn encodeSetRequest(set_request: SetRequest, buf: []u8) EncodeError!usize {
-    var encoder = Encoder{ .buf = buf };
+fn encodeSetRequest(set_request: SetRequest, encoder: *Encoder) EncodeError!usize {
     _ = try encoder.encodeString(set_request.key);
     _ = try encoder.encodeString(set_request.value);
     return encoder.written;
@@ -78,10 +93,19 @@ fn decodeDelete(decoder: *Decoder) DecodeError!DeleteRequest {
     return .{ .key = key };
 }
 
+fn encodeDelete(delete_request: DeleteRequest, encoder: *Encoder) EncodeError!usize {
+    _ = try encoder.encodeString(delete_request.key);
+    return encoder.written;
+}
+
 pub const ListRequest = struct {};
 
 fn decodeListRequest() ListRequest {
     return .{};
+}
+
+fn encodeListRequest() void {
+    return;
 }
 
 pub const UnknownRequest = struct {
@@ -92,7 +116,6 @@ pub fn decodeUnknownRequest(decoder: *Decoder) DecodeError!UnknownRequest {
     return .{ .content = decoder.r_buf() };
 }
 
-pub fn encodeUnknownRequest(unknown_request: UnknownRequest, buf: []u8) EncodeError!usize {
-    @memcpy(buf[0..unknown_request.content.len], unknown_request.content);
-    return unknown_request.content.len;
+pub fn encodeUnknownRequest(unknown_request: UnknownRequest, encoder: *Encoder) EncodeError!usize {
+    return encoder.encodeBytes(unknown_request.content);
 }

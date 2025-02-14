@@ -95,52 +95,24 @@ pub const TestClient = struct {
         return self.test_conn.connection();
     }
 
-    pub fn sendRequest(self: *TestClient, buf: []const u8) !protocol.Response {
+    pub fn sendRequest(self: *TestClient, request: protocol.Request) !protocol.Response {
         std.log.debug("send req", .{});
         self.cs_stream.buffer = self.cs_stream_buf[0..];
         self.cs_stream.reset();
         self.sc_stream.reset();
 
-        _ = try self.cs_stream.write(buf);
-        self.cs_stream.buffer.len = buf.len;
-        std.log.debug("seek to", .{});
-        try self.cs_stream.seekTo(0);
+        const req_len = try protocol.encodeRequest(
+            request,
+            self.cs_stream_buf[protocol.len_header_size..],
+        );
+        _ = try protocol.encodeHeader(req_len, &self.cs_stream_buf);
+        const message_len = protocol.len_header_size + req_len;
+
+        self.cs_stream.buffer.len = message_len;
         std.log.debug("finish send req", .{});
 
         try connectionIo(self.connection(), self.server.mapping);
         return try self.getResponse();
-    }
-
-    pub fn sendGetRequest(self: *TestClient, key: []const u8) !protocol.GetResponse {
-        var req_buf: [100]u8 = undefined;
-        const req_len = try client.createGetReq(key, &req_buf);
-        std.log.debug("req_len - {}", .{req_len});
-
-        return (try self.sendRequest(req_buf[0..req_len])).Get;
-    }
-
-    pub fn sendSetRequest(self: *TestClient, message: []const u8) !protocol.SetResponse {
-        var req_buf: [100]u8 = undefined;
-        const req_len = try client.createSetReq(message, &req_buf);
-        std.log.debug("req_len - {}", .{req_len});
-
-        return (try self.sendRequest(req_buf[0..req_len])).Set;
-    }
-
-    pub fn sendDeleteRequest(self: *TestClient, message: []const u8) !protocol.DeleteResponse {
-        var req_buf: [100]u8 = undefined;
-        const req_len = try client.createDelReq(message, &req_buf);
-        std.log.debug("req_len - {}", .{req_len});
-
-        return (try self.sendRequest(req_buf[0..req_len])).Delete;
-    }
-
-    pub fn sendListRequest(self: *TestClient, message: []const u8) !protocol.ListResponse {
-        var req_buf: [100]u8 = undefined;
-        const req_len = try client.createListReq(message, &req_buf);
-        std.log.debug("req_len - {}", .{req_len});
-
-        return (try self.sendRequest(req_buf[0..req_len])).List;
     }
 
     fn getResponse(self: *TestClient) !protocol.Response {

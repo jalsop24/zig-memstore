@@ -11,7 +11,6 @@ const Command = types.Command;
 const COMMAND_LEN_BYTES = types.COMMAND_LEN_BYTES;
 
 const len_header_size = protocol.len_header_size;
-const encodeHeader = protocol.encodeHeader;
 
 const Encoder = serialization.Encoder;
 
@@ -225,7 +224,7 @@ pub fn createGetReq(message: []const u8, wbuf: []u8) !usize {
     m_len += key_len;
     std.log.debug("Key length {}", .{key_len});
 
-    m_len += try encodeHeader(m_len, wbuf);
+    m_len += try protocol.encodeHeader(m_len, wbuf);
     return m_len;
 }
 
@@ -243,7 +242,7 @@ pub fn createSetReq(message: []const u8, wbuf: []u8) !usize {
     m_len += val_len;
     std.log.debug("Val length {}", .{val_len});
 
-    m_len += try encodeHeader(m_len, wbuf);
+    m_len += try protocol.encodeHeader(m_len, wbuf);
     return m_len;
 }
 
@@ -257,7 +256,7 @@ pub fn createDelReq(message: []const u8, wbuf: []u8) !usize {
     m_len += key_len;
     std.log.debug("Key length {}", .{key_len});
 
-    m_len += try encodeHeader(m_len, wbuf);
+    m_len += try protocol.encodeHeader(m_len, wbuf);
     return m_len;
 }
 
@@ -266,7 +265,7 @@ pub fn createListReq(message: []const u8, wbuf: []u8) !usize {
     const out_buf = wbuf[len_header_size..];
     var m_len: usize = 0;
     m_len += try encodeCommand(Command.List, out_buf);
-    m_len += try encodeHeader(m_len, wbuf);
+    m_len += try protocol.encodeHeader(m_len, wbuf);
     return m_len;
 }
 

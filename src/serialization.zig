@@ -6,10 +6,12 @@ const Object = types.Object;
 pub const EncodeError = error{BufferTooSmall};
 pub const DecodeError = error{ InvalidType, BufferTooSmall, OutOfMemory };
 
+pub const ENDIAN = std.builtin.Endian.little;
+
+pub const MessageLen = u32;
+
 const StringLen = u16;
 const ArrayLen = u16;
-
-const ENDIAN = std.builtin.Endian.little;
 
 pub const Encoder = struct {
     buf: []u8,
@@ -18,7 +20,7 @@ pub const Encoder = struct {
     const Self = @This();
 
     pub fn encodeObject(self: *Self, object: Object) EncodeError!usize {
-        var written = try self.encodeTag(object);
+        var written = try self.encodeTag(Object, object);
 
         switch (object) {
             .nil => {}, // No-op for nil
@@ -31,8 +33,8 @@ pub const Encoder = struct {
         return written;
     }
 
-    pub fn encodeTag(self: *Self, object: Object) EncodeError!usize {
-        const TagType = @typeInfo(Object).@"union".tag_type.?;
+    pub fn encodeTag(self: *Self, comptime TaggedUnion: type, object: TaggedUnion) EncodeError!usize {
+        const TagType = @typeInfo(TaggedUnion).@"union".tag_type.?;
         std.debug.assert(@sizeOf(TagType) == 1);
 
         const buf = self.w_buf();
@@ -42,42 +44,26 @@ pub const Encoder = struct {
     }
 
     pub fn encodeString(self: *Self, string: types.String) EncodeError!usize {
-        const buf = self.w_buf();
         const string_len = string.content.len;
 
-        const header_size = try encodeGenericInteger(
-            StringLen,
-            @intCast(string_len),
-            buf,
-        );
-        @memcpy(buf[header_size..][0..string_len], string.content);
+        var written: usize = 0;
+        written += try self.encodeGenericInteger(StringLen, @intCast(string_len));
+        written += try self.encodeBytes(string.content);
 
-        return self.update(header_size + string_len);
+        return written;
     }
 
     pub fn encodeInteger(self: *Self, integer: types.Integer) EncodeError!usize {
-        return self.update(try encodeGenericInteger(
-            types.Integer,
-            integer,
-            self.w_buf(),
-        ));
+        return try self.encodeGenericInteger(types.Integer, integer);
     }
 
     pub fn encodeDouble(self: *Self, double: types.Double) EncodeError!usize {
-        return self.update(try encodeGenericInteger(
-            u64,
-            @bitCast(double),
-            self.w_buf(),
-        ));
+        return try self.encodeGenericInteger(u64, @bitCast(double));
     }
 
     pub fn encodeArray(self: *Self, array: types.Array) EncodeError!usize {
         var written: usize = 0;
-        written += self.update(try encodeGenericInteger(
-            ArrayLen,
-            @intCast(array.objects.len),
-            self.w_buf(),
-        ));
+        written += try self.encodeGenericInteger(ArrayLen, @intCast(array.objects.len));
 
         for (array.objects) |object| {
             written += try self.encodeObject(object);
@@ -87,11 +73,30 @@ pub const Encoder = struct {
     }
 
     pub fn encodeCommand(self: *Self, command: types.Command) EncodeError!usize {
-        return self.update(try encodeGenericInteger(
+        return try self.encodeGenericInteger(
             @typeInfo(types.Command).@"enum".tag_type,
             @intFromEnum(command),
+        );
+    }
+
+    pub fn encodeBytes(self: *Self, bytes: []const u8) EncodeError!usize {
+        try ensureBufferLength(self.w_buf(), bytes.len);
+        @memcpy(self.w_buf()[0..bytes.len], bytes);
+        return self.update(bytes.len);
+    }
+
+    pub fn encodeGenericInteger(self: *Self, comptime T: type, integer: T) EncodeError!usize {
+        const int_size = @sizeOf(T);
+        try ensureBufferLength(self.w_buf(), int_size);
+
+        std.mem.writePackedInt(
+            T,
             self.w_buf(),
-        ));
+            0,
+            integer,
+            ENDIAN,
+        );
+        return self.update(int_size);
     }
 
     inline fn w_buf(self: *Self) []u8 {
@@ -108,19 +113,6 @@ pub fn serialize(object: Object, buf: []u8) EncodeError![]u8 {
     var encoder = Encoder{ .buf = buf };
     const written = try encoder.encodeObject(object);
     return buf[0..written];
-}
-
-pub fn encodeGenericInteger(comptime T: type, integer: T, buf: []u8) EncodeError!usize {
-    const int_size = @sizeOf(T);
-    try ensureBufferLength(buf, int_size);
-    std.mem.writePackedInt(
-        T,
-        buf,
-        0,
-        integer,
-        ENDIAN,
-    );
-    return int_size;
 }
 
 pub const Decoder = struct {

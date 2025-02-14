@@ -98,7 +98,7 @@ fn tryOneRequest(conn: GenericConn, mapping: *Mapping) bool {
         u32,
         length_header,
         0,
-        .little,
+        protocol.ENDIAN,
     );
 
     if (len > protocol.k_max_msg) {
