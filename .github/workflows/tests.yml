@@ -6,6 +6,7 @@ jobs:
   tests:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v4
-    run:
-      make test
+    - name: Check out repo
+      uses: actions/checkout@v4
+    - name: Run unit tests
+      run: make test
