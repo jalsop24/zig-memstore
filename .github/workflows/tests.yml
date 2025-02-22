@@ -3,7 +3,7 @@ name: Run Unit Tests
 on: [push]
 
 env:
-  ZIG_VERSION: 0.13.0
+  ZIG_VERSION: 0.14.0-dev.3287+65e7ede49
 
 jobs:
   tests:
