@@ -12,8 +12,8 @@ jobs:
     - name: Check out repo
       uses: actions/checkout@v4
     - uses: goto-bus-stop/setup-zig@v2
-        with:
-          version: ${{ env.ZIG_VERSION }}
+      with:
+        version: ${{ env.ZIG_VERSION }}
     - uses: Hanaasagi/zig-action-cache@master
     - name: Run unit tests
       run: make ci-test
