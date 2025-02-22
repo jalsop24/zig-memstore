@@ -2,11 +2,18 @@ name: Run Unit Tests
 
 on: [push]
 
+env:
+  ZIG_VERSION: 0.13.0
+
 jobs:
   tests:
     runs-on: ubuntu-latest
     steps:
     - name: Check out repo
       uses: actions/checkout@v4
+    - uses: goto-bus-stop/setup-zig@v2
+        with:
+          version: ${{ env.ZIG_VERSION }}
+    - uses: Hanaasagi/zig-action-cache@master
     - name: Run unit tests
-      run: make test
+      run: make ci-test
