@@ -93,6 +93,16 @@ pub fn decodeResponse(allocator: std.mem.Allocator, buf: []const u8) DecodeError
     }
 }
 
+pub fn encodeResponse(response: Response, buf: []u8) EncodeError!usize {
+    switch (response) {
+        .Get => |get_response| return encodeGetResponse(get_response, buf),
+        .Set => |set_response| return encodeSetResponse(set_response, buf),
+        .Delete => |delete_response| return encodeDeleteResponse(delete_response, buf),
+        .List => |list_response| return encodeListReponse(list_response, buf),
+        .Unknown => |unknown_response| return encodeUnknownResponse(unknown_response, buf),
+    }
+}
+
 pub const GetResponse = struct {
     key: types.String,
     value: ?types.String,

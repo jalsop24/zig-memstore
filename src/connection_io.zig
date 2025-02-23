@@ -3,7 +3,8 @@ const std = @import("std");
 const connection = @import("connection.zig");
 const types = @import("types.zig");
 const protocol = @import("protocol.zig");
-const parseRequest = @import("request_handlers.zig").parseRequest;
+const request_handlers = @import("request_handlers.zig");
+const parseRequest = request_handlers.parseRequest;
 
 const GenericConn = connection.GenericConn;
 const Mapping = types.Mapping;
