@@ -6,13 +6,8 @@ const types = @import("types.zig");
 
 const ConnState = connection.ConnState;
 const Mapping = types.Mapping;
-const MessageBuffer = protocol.MessageBuffer;
-const String = types.String;
 
 const HandleRequestError = error{InvalidRequest} || protocol.PayloadCreationError;
-
-const Command = types.Command;
-const COMMAND_LEN_BYTES = types.COMMAND_LEN_BYTES;
 
 const EncodeError = protocol.EncodeError;
 const Response = protocol.Response;
