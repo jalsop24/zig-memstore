@@ -6,6 +6,28 @@ const Allocator = std.mem.Allocator;
 pub const Mapping = HashMap;
 pub const ConnMapping = std.AutoArrayHashMap(std.posix.socket_t, *NetConn);
 
+pub const Tag = enum(u8) {
+    nil = 0,
+    integer = 1,
+    double = 2,
+    string = 3,
+    array = 4,
+};
+
+pub const Object = union(Tag) {
+    nil: Nil,
+    integer: Integer,
+    double: Double,
+    string: String,
+    array: Array,
+};
+
+pub const Nil = struct {};
+
+pub const Integer = u64;
+
+pub const Double = f64;
+
 pub const String = struct {
     content: []const u8,
 
@@ -25,6 +47,24 @@ pub const String = struct {
         return String.init(allocator, self.content);
     }
 };
+
+pub const Array = struct {
+    objects: []const Object,
+};
+
+pub const Command = enum(u8) {
+    Get = 1,
+    Set = 2,
+    Delete = 3,
+    List = 4,
+    Unknown = 5,
+
+    pub const GET_LITERAL = "get";
+    pub const SET_LITERAL = "set";
+    pub const DELETE_LITERAL = "del";
+    pub const LIST_LITERAL = "lst";
+};
+pub const COMMAND_LEN_BYTES = @sizeOf(Command);
 
 /// For use with intrusive data structures. `node` must be embedded within an instance of the type `T`
 pub fn container_of(
