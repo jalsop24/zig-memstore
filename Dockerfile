@@ -3,14 +3,17 @@ WORKDIR /app
 
 CMD ["bash"]
 
-ENV ZIG_VERSION=linux-x86_64-0.14.1
+ARG ZIG_VERSION=0.14.1
+ARG ARCH=x86_64
+ARG ZIG_FOLDER=zig-$ARCH-linux-$ZIG_VERSION
+ARG ZIG_URL=https://ziglang.org/download/0.14.1/$ZIG_FOLDER.tar.xz
 
-RUN curl -sS https://ziglang.org/builds/zig-$ZIG_VERSION.tar.xz > archive.tar.xz \
+RUN curl -sS $ZIG_URL > archive.tar.xz \
     && ls -al /app \
     && tar -xf archive.tar.xz \
     && rm archive.tar.xz
 
-ENV PATH=/app/zig-$ZIG_VERSION:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+ENV PATH=/app/$ZIG_FOLDER:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
 COPY /src /app/src
 COPY build.zig /app/build.zig
