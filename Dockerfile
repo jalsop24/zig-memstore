@@ -3,7 +3,7 @@ WORKDIR /app
 
 CMD ["bash"]
 
-ENV ZIG_VERSION=linux-aarch64-0.14.0-dev.3287+65e7ede49
+ENV ZIG_VERSION=linux-x86_64-0.14.1
 
 RUN curl -sS https://ziglang.org/builds/zig-$ZIG_VERSION.tar.xz > archive.tar.xz \
     && ls -al /app \
